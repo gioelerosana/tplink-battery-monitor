@@ -1,6 +1,6 @@
 # TP-Link M7350 Battery Monitor
 
-[![CI](https://github.com/JoelShepard/tplink-battery-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/JoelShepard/tplink-battery-monitor/actions/workflows/ci.yml)
+[![CI](https://github.com/gioelerosana/tplink-battery-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/gioelerosana/tplink-battery-monitor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Get a desktop notification when the battery of a portable TP-Link MiFi router

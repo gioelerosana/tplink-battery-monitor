@@ -25,5 +25,5 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - systemd user `oneshot` service + 5-minute timer.
 - Documentation: protocol write-up and architecture notes.
 
-[Unreleased]: https://github.com/JoelShepard/tplink-battery-monitor/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/JoelShepard/tplink-battery-monitor/releases/tag/v0.1.0
+[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v0.1.0...HEAD
+[0.1.0]: https://github.com/gioelerosana/tplink-battery-monitor/releases/tag/v0.1.0

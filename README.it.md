@@ -1,6 +1,6 @@
 # TP-Link M7350 Battery Monitor
 
-[![CI](https://github.com/JoelShepard/tplink-battery-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/JoelShepard/tplink-battery-monitor/actions/workflows/ci.yml)
+[![CI](https://github.com/gioelerosana/tplink-battery-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/gioelerosana/tplink-battery-monitor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
 Notifica desktop quando la batteria del router mobile TP-Link scende sotto una
