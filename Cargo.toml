@@ -1,0 +1,30 @@
+[package]
+name = "tplink-battery-monitor"
+version = "0.1.0"
+edition = "2021"
+description = "Monitor batteria router mobile TP-Link (M7350) con notifiche desktop"
+license = "MIT"
+
+[lib]
+name = "tplink_mifi"
+path = "src/tplink_mifi.rs"
+
+[[bin]]
+name = "tplink-battery-monitor"
+path = "src/main.rs"
+
+[dependencies]
+ureq = { version = "2", default-features = false }
+serde_json = { version = "1", features = ["preserve_order"] }
+aes = "0.8"
+cbc = { version = "0.1", features = ["alloc", "block-padding"] }
+md-5 = "0.10"
+rsa = "0.9"
+rand = "0.8"
+base64 = "0.22"
+notify-rust = "4"
+chrono = { version = "0.4", default-features = false, features = ["clock"] }
+
+[profile.release]
+lto = true
+strip = true

@@ -1,0 +1,10 @@
+[Unit]
+Description=Controllo batteria router TP-Link M7350
+Documentation=https://github.com/JoelShepard/tplink-battery-monitor#readme
+After=network-online.target
+
+[Service]
+Type=oneshot
+# Il binario legge la configurazione da:
+#   $TP_ENV_FILE, ./.env, ~/.config/tplink-battery-monitor/.env
+ExecStart=%h/.local/bin/tplink-battery-monitor --once
