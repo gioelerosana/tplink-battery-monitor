@@ -24,7 +24,17 @@ rand = "0.8"
 base64 = "0.22"
 notify-rust = "4"
 chrono = { version = "0.4", default-features = false, features = ["clock"] }
+ksni = { version = "0.3.6", default-features = false, features = ["async-io", "blocking"] }
+serde = { version = "1.0.229", features = ["derive"] }
 
 [profile.release]
 lto = true
 strip = true
+
+# ksni 0.3.6 non espone la proprieta' Ayatana `XAyatanaLabel` (testo accanto
+# all'icona nella barra di sistema). Usiamo una copia locale in `vendor/ksni`
+# con questa piccola patch, cosi' il binario resta un singolo eseguibile
+# ottimizzato senza dipendenze runtime aggiuntive.
+[patch.crates-io]
+ksni = { path = "vendor/ksni" }
+

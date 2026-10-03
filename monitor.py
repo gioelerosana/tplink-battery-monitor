@@ -1,11 +1,13 @@
 #!/usr/bin/env python3
-"""Monitor della batteria del router TP-Link M7350 con notifiche desktop.
+"""Monitor della batteria e consumo dati del router TP-Link M7350 con notifiche desktop e tray app.
 
 Esegue il polling dell'API del router e invia una notifica (notify-send)
 quando la batteria scende sotto una soglia (default 20%) e non e' in carica.
 
 Uso:
-    python monitor.py                 # loop continuo
+    python monitor.py                 # loop continuo da terminale / background
+    python monitor.py --tray          # avvia l'app companion nella barra di sistema (tray / pannello)
+    python monitor.py --data          # visualizza giga consumati e rimanenti ed esci
     python monitor.py --once          # un singolo controllo (per cron)
     python monitor.py --no-notify     # solo log, senza notifiche
 """
@@ -114,7 +116,7 @@ def check_once(
         if not known_charging and charging:
             if notify_enabled:
                 notify(
-                    "🔌 Router M7350: carica avviata",
+                    "Router M7350: carica avviata",
                     f"Batteria al {level}%. Caricabatterie collegato.",
                     urgency="normal",
                     icon="battery-charging",
@@ -125,7 +127,7 @@ def check_once(
             if level >= 100 and not state.get("full_notified"):
                 if notify_enabled:
                     notify(
-                        "✅ Router M7350: carica completa",
+                        "Router M7350: carica completa",
                         "Batteria al 100%.",
                         urgency="normal",
                         icon="battery-full",
@@ -138,7 +140,7 @@ def check_once(
             else:
                 if notify_enabled:
                     notify(
-                        "⚠️ Router M7350: carica interrotta",
+                        "Router M7350: carica interrotta",
                         f"La carica si è fermata al {level}%.",
                         urgency="normal",
                         icon="battery-low",
@@ -156,7 +158,7 @@ def check_once(
         if not was_low or due:
             if notify_enabled:
                 notify(
-                    f"⚠️ Router M7350: batteria al {level}%",
+                    f"Router M7350: batteria al {level}%",
                     "Livello sotto la soglia. Collega il caricabatterie!",
                     urgency="critical",
                     icon="battery-caution",
@@ -166,7 +168,7 @@ def check_once(
     elif was_low and not charging and level >= threshold:
         if notify_recovery and notify_enabled:
             notify(
-                f"🔋 Router M7350: batteria al {level}%",
+                f"Router M7350: batteria al {level}%",
                 "Livello tornato sopra la soglia.",
                 urgency="normal",
                 icon="battery-good",
@@ -177,6 +179,34 @@ def check_once(
     state["low"] = low
     state["level"] = level
     write_state(state)
+
+
+def print_data_overview(client: MiFiClient) -> None:
+    try:
+        summary = client.summary()
+    except TpLinkError as exc:
+        sys.exit(f"Errore connessione router: {exc}")
+
+    batt = summary["battery"]
+    data = summary["data"]
+    charge_str = "in carica" if batt.get("charging") else "a batteria"
+
+    print("══════════════════════════════════════════════════")
+    print(f"  TP-Link {summary.get('model', 'M7350')} Status")
+    print("══════════════════════════════════════════════════")
+    print(f"  Batteria:       {batt.get('level')}% ({charge_str})")
+    print("──────────────────────────────────────────────────")
+    print(f"  Dati usati:     {data.get('total_formatted')} / {data.get('limit_formatted')}")
+    if data.get("has_limit"):
+        print(f"  Avanzamento:    {data.get('progress_bar')} usato")
+        print(f"  Rimanenti:      {data.get('remaining_formatted')}")
+    print(f"  Consumo oggi:   {data.get('daily_formatted')}")
+    print("──────────────────────────────────────────────────")
+    print(f"  Rete:           {data.get('operator')} ({data.get('network_type')})")
+    print(f"  Segnale:        {data.get('signal_strength')}/4 ({data.get('signal_percent')}%)")
+    print(f"  Dispositivi:    {summary.get('connected_devices')} connessi")
+    print(f"  Velocità:       ↓ {data.get('rx_speed_formatted')}   ↑ {data.get('tx_speed_formatted')}")
+    print("══════════════════════════════════════════════════")
 
 
 def main() -> int:
@@ -214,12 +244,48 @@ def main() -> int:
         action="store_true",
         help="notifica anche quando la batteria torna sopra la soglia",
     )
+    parser.add_argument(
+        "--data",
+        action="store_true",
+        help="mostra un riepilogo del consumo giga e della batteria nel terminale ed esci",
+    )
+    parser.add_argument(
+        "--tray",
+        action="store_true",
+        help="avvia l'app companion con icona nella barra di sistema / background panel",
+    )
     args = parser.parse_args()
 
     if not args.password:
         parser.error("specifica --password oppure imposta TPLINK_PASSWORD nel .env")
 
     client = MiFiClient(host=args.host, password=args.password)
+
+    if args.data:
+        print_data_overview(client)
+        return 0
+
+    if args.tray:
+        from tplink_tray import MiFiTrayApp
+        import gi
+        from gi.repository import GLib, Gtk
+        import signal
+
+        signal.signal(signal.SIGINT, lambda *_: Gtk.main_quit())
+        signal.signal(signal.SIGTERM, lambda *_: Gtk.main_quit())
+        GLib.timeout_add(500, lambda: True)
+
+        _app = MiFiTrayApp(
+            client=client,
+            poll_interval=args.interval * 60,
+            battery_threshold=args.threshold,
+            cooldown_minutes=args.cooldown,
+            notifications_enabled=not args.no_notify,
+        )
+        log(f"Avvio tray monitor (intervallo: {args.interval:g}min)")
+        Gtk.main()
+        return 0
+
     notify_enabled = not args.no_notify
 
     if args.once:

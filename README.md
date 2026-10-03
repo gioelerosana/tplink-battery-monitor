@@ -1,91 +1,149 @@
-# TP-Link M7350 Battery Monitor
+# TP-Link M7350 Battery & Data Monitor
 
 [![CI](https://github.com/gioelerosana/tplink-battery-monitor/actions/workflows/ci.yml/badge.svg)](https://github.com/gioelerosana/tplink-battery-monitor/actions/workflows/ci.yml)
 [![License: MIT](https://img.shields.io/badge/License-MIT-yellow.svg)](LICENSE)
 
-Get a desktop notification when the battery of a portable TP-Link MiFi router
-drops below a threshold (default **20%**), plus notifications for charging
-events (charge started / complete / interrupted).
+Companion app with system tray icon (background panel) and desktop notification monitor for portable TP-Link routers (e.g. M7350).
+Provides at a glance:
+- **Battery percentage** and charging status
+- **Data consumption** vs **remaining data** and total plan limit (with visual progress bar)
+- **Today's data usage**
+- **Mobile network status** (operator, 4G LTE signal, tx/rx speed and connected devices)
 
-> 🇮🇹 [Leggi il README in italiano](README.it.md)
+> [Leggi il README in italiano](README.it.md)
 
-The router firmware exposes an undocumented JSON API used by its own web UI.
-This project reverse-engineers that API, reimplements the AES + RSA + MD5
-authentication flow, and ships **two equivalent (1:1) implementations**:
+The router firmware exposes an undocumented JSON API used by its own web UI. This project reverse-engineers that API, reimplements the AES + RSA + MD5 authentication flow, and ships both a **Tray Companion App** and CLI tools in Python and Rust:
 
-| Implementation | Files | Notification backend |
+| Component | Files | Description |
 | --- | --- | --- |
-| **Rust** (recommended, single binary) | `src/tplink_mifi.rs`, `src/main.rs` | native D-Bus (`notify-rust`) |
-| **Python** | `tplink_mifi.py`, `monitor.py` | `notify-send` |
+| **Tray Companion App** | `tplink_tray.py` | Battery icon & percentage in the system tray, detailed drop-down menu on click |
+| **Python CLI Monitor** | `monitor.py` | Background polling, desktop notifications (`notify-send`), terminal `--data` view |
+| **Python API Client** | `tplink_mifi.py` | Reusable API library (battery, data usage, status, reboot) |
+| **Rust Binary Monitor** | `src/tplink_mifi.rs`, `src/main.rs` | Final standalone binary: tray companion (`--tray`), systemd timer, native D-Bus notifications |
 
-The Rust version builds to a single binary designed to be run periodically by
-a **systemd user timer** (oneshot service). The Python version is handy for
-inspection and experimentation without compiling.
-
-Tested on **TP-Link M7350 (EU) v9.0**, firmware `9.0.5`. It should work on
-other TP-Link mobile Wi-Fi models that expose the `/cgi-bin/web_cgi` API
-(e.g. M7000 / M7200 family).
+Tested on **TP-Link M7350 (EU) v9.0**, firmware `9.0.5`. Compatible with TP-Link mobile Wi-Fi models using the `/cgi-bin/web_cgi` JSON API (e.g. M7000 / M7200 / M7350).
 
 ## Features
 
-- Battery level monitoring with a configurable threshold (default 20%).
-- Low-battery alert suppressed while charging.
-- Charge-event notifications:
-  - 🔌 **charge started** (battery → charging),
-  - ✅ **charge complete** (reaches 100%),
-  - ⚠️ **charge interrupted** (unplugged before 100%).
-- Notification cooldown + state hysteresis (no notification spam).
-- Persistent state across runs, so the cooldown survives the timer cadence.
-- No cloud, no browser: it talks directly to the router on your LAN.
-
-## Requirements
-
-- **Rust** (stable toolchain, `cargo`) for the binary version.
-- **Python 3.9+** and `cryptography` for the Python version.
-- A graphical session with D-Bus / `notify-send` for desktop notifications.
-- A machine connected to the router's LAN.
+- **Battery Monitor**: exact percentage displayed in the system panel, plus desktop notifications when below threshold (default 20%).
+- **Data Usage & Remaining Giga**: immediate visual glance at consumed data, remaining data, plan limit and daily traffic.
+- **Smart Charging Events**:
+  - Charge started,
+  - Charge completed (100%),
+  - Charge interrupted (unplugged before 100%).
+- **Connection Info**: cellular operator, network type (4G/LTE), signal strength (0-4), real-time speed and connected clients.
+- **Quick Web Access**: one-click button to open the router web interface (192.168.0.1).
+- **Zero Cloud**: direct LAN/Wi-Fi communication with the router, credentials stored only in your local `.env`.
 
 ## Configuration
 
-Copy `.env.example` to `.env` and fill it in:
+Copy `.env.example` to `.env` and set your router admin password:
 
 ```ini
 TPLINK_HOST=192.168.0.1
 TPLINK_PASSWORD=your_admin_password
 BATTERY_THRESHOLD=20
-CHECK_INTERVAL_MINUTES=5
+CHECK_INTERVAL_SECONDS=60
 NOTIFY_COOLDOWN_MINUTES=60
 ```
 
-The Rust binary looks for the config in this order: `$TP_ENV_FILE`, `./.env`,
-`~/.config/tplink-battery-monitor/.env`. Real environment variables always
-take precedence. `.env` is git-ignored: **never commit your password**.
+The `.env` file is git-ignored: **never commit your password**.
 
-## Rust: build, install, run
+---
+
+## Tray Companion App (Background Panel)
+
+The final, distributable product is the standalone optimized Rust binary. It sits in your system tray (GNOME top bar indicator area via the AppIndicator extension, KDE system tray, etc.) and displays the TP-Link logo icon (embedded in the binary, no extra files) with a text label next to it: the battery percentage and, by default, the remaining GB. When the router is unreachable the logo is shown "powered off" (desaturated and darker) and the menu becomes minimal.
+
+### Running the Rust binary (final product)
+
+```bash
+cargo build --release
+./target/release/tplink-battery-monitor --tray
+
+# Hide the battery percentage next to the icon (data only):
+./target/release/tplink-battery-monitor --tray --no-battery-in-panel
+
+# Show only the battery percentage next to the icon:
+./target/release/tplink-battery-monitor --tray --no-data-in-panel
+```
+
+### On-Click Dropdown Menu (compact, with colored icons):
+- **Header**: device model
+- **Connection**: `WEB CoopVoce · 4G (LTE)`
+- **Battery**: `47% · a batteria` with a large green battery bar (red below 20%)
+- **Data**: `134.6 / 400 GB · 33%` with a large blue progress bar
+- **Today**: `Oggi 3.9 GB`
+- **Network submenu**: signal bars (colored), connected devices and live speed
+- **Actions**: `Aggiorna`, `Apri router`
+- **Toggles** (persisted in `~/.config/tplink-battery-monitor/prefs.json`): `Percentuale batteria`, `Mostra GB`, `Notifiche`
+
+### Python prototype
+
+`tplink_tray.py` is the reference prototype used during development; the Rust binary is the supported product.
+
+```bash
+python3 tplink_tray.py
+python3 monitor.py --tray
+```
+
+### Autostart on login
+
+```bash
+# Standalone Rust binary
+./target/release/tplink-battery-monitor --install-autostart
+./target/release/tplink-battery-monitor --uninstall-autostart
+```
+
+Alternatively, a systemd user service unit is provided in `systemd/tplink-tray.service`.
+
+---
+
+## Terminal Overview (`--data`)
+
+Both the Python and Rust implementations support the `--data` flag for a quick terminal glance:
+
+```bash
+python3 monitor.py --data
+# or with the compiled Rust binary:
+./target/release/tplink-battery-monitor --data
+```
+
+Example output:
+```text
+══════════════════════════════════════════════════
+  TP-Link M7350 Status
+══════════════════════════════════════════════════
+  Batteria:       47% (a batteria)
+──────────────────────────────────────────────────
+  Dati usati:     133.86 GB / 400.00 GB
+  Avanzamento:    [████░░░░░░░░] 33.5% usato
+  Rimanenti:      266.14 GB
+  Consumo oggi:   3.19 GB
+──────────────────────────────────────────────────
+  Rete:           WEB CoopVoce (4G (LTE))
+  Segnale:        3/4 (75%)
+  Dispositivi:    3 connessi
+  Velocità:       ↓ 22.5 KB/s   ↑ 283.1 KB/s
+══════════════════════════════════════════════════
+```
+
+---
+
+## Rust: build and systemd user timer
 
 ```bash
 cargo build --release
 # binary at target/release/tplink-battery-monitor
 
-# single check, no notifications (just verify it works)
+# single check, no notifications (test)
 ./target/release/tplink-battery-monitor --once --no-notify
 
-# continuous loop
-./target/release/tplink-battery-monitor
-
-# single check forcing a notification (test)
-./target/release/tplink-battery-monitor --once --threshold 100
+# data overview
+./target/release/tplink-battery-monitor --data
 ```
 
-Options: `--host`, `--password`, `--threshold`, `--interval`, `--cooldown`,
-`--once`, `--no-notify`, `--notify-recovery`.
-
-State is stored in `~/.cache/tplink-battery-monitor/state.json`
-(override with `TP_BATTERY_STATE`).
-
 ### systemd user timer
-
-The files in `systemd/` install the binary and a **5-minute user timer**:
 
 ```bash
 mkdir -p ~/.local/bin ~/.config/tplink-battery-monitor ~/.config/systemd/user
@@ -95,78 +153,26 @@ cp .env ~/.config/tplink-battery-monitor/.env && chmod 600 ~/.config/tplink-batt
 cp systemd/tplink-battery-monitor.service systemd/tplink-battery-monitor.timer ~/.config/systemd/user/
 systemctl --user daemon-reload
 systemctl --user enable --now tplink-battery-monitor.timer
-
-systemctl --user list-timers tplink-battery-monitor.timer
-journalctl --user -u tplink-battery-monitor.service -f
 ```
 
-The `service` is `Type=oneshot` and is triggered by the `timer`
-(`OnUnitActiveSec=5min`, `AccuracySec=30s`). No `DISPLAY` is needed: the
-notification travels over D-Bus in the user session.
+---
 
-## Python: run
+## The `battery` field quirk
 
-```bash
-# single check, no notifications
-python3 monitor.py --once --no-notify
-
-# continuous loop (reads .env)
-python3 monitor.py
-
-# single check forcing a notification
-python3 monitor.py --once --threshold 100
-
-# low-level API client
-python3 tplink_mifi.py --password '...' battery
-python3 tplink_mifi.py --password '...' status
-```
-
-### cron (alternative to the systemd timer)
-
-```cron
-*/5 * * * * cd /path/to/tplink-battery-monitor && /usr/bin/python3 monitor.py --once >> monitor.log 2>&1
-```
-
-With cron, desktop notifications need `DISPLAY` and
-`DBUS_SESSION_BUS_ADDRESS` in the environment; systemd is preferred.
-
-## The `battery` field gotcha
-
-The firmware reports:
-
+The router reports:
 ```json
-"battery": { "connected": true, "charging": false, "voltage": 98 }
+"battery": { "connected": true, "charging": false, "voltage": 48 }
 ```
+Despite the name `voltage`, the value is already a percentage (0–100). The web UI uses it directly to choose the battery icon, and both implementations expose it as `level`.
 
-Despite the name, **`voltage` already contains the percentage (0–100)** — the
-web UI uses it directly to pick the battery icon. So `voltage: 98` means
-98% battery. Both implementations expose it as `level` as well.
-
-## How it works
-
-The router uses a JSON API with two endpoints and a "GDPR" encryption layer
-(AES-128-CBC for the payload, RSA-512 for the signature, MD5 for the
-password hash). A complete write-up of the protocol is in
-[docs/protocol.md](docs/protocol.md), and the software architecture
-(transport vs. application layer, state machine, deployment) is in
-[docs/architecture.md](docs/architecture.md).
+Data limits and usage (`limitation`, `totalStatistics`) are calculated in binary gigabytes (1024³ = 1 GiB), matching the router's web portal.
 
 ## Documentation
 
-- [docs/protocol.md](docs/protocol.md) — reverse-engineered HTTP API.
-- [docs/architecture.md](docs/architecture.md) — software architecture.
-- [CONTRIBUTING.md](CONTRIBUTING.md) — build, test and contribution notes.
-- [CHANGELOG.md](CHANGELOG.md) — release history.
-- [SECURITY.md](SECURITY.md) — how secrets are handled.
-
-## Troubleshooting
-
-- **"Router non raggiungibile"** — make sure you run the tool on the router's
-  LAN and that `TPLINK_HOST` is correct (default `192.168.0.1`).
-- **"Password del router errata"** — the admin password in `.env` is wrong.
-- **No notification appears** — check that `notify-send` / the D-Bus session
-  works in your graphical session; from a systemd service, use a *user*
-  service (not a system service).
+- [docs/protocol.md](docs/protocol.md) — HTTP API details.
+- [docs/architecture.md](docs/architecture.md) — Software architecture.
+- [CONTRIBUTING.md](CONTRIBUTING.md) — Development & contribution guide.
+- [CHANGELOG.md](CHANGELOG.md) — Release notes.
 
 ## License
 

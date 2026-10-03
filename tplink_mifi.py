@@ -55,6 +55,43 @@ ACTION = {
     "reboot": 0,
 }
 
+NETWORK_TYPES = {
+    0: "Nessun servizio",
+    1: "2G (GSM)",
+    2: "3G (WCDMA)",
+    3: "4G (LTE)",
+    4: "3G (TD-SCDMA)",
+    5: "CDMA 1x",
+    6: "CDMA EVDO",
+    7: "4G+ (LTE+)",
+}
+
+
+def format_bytes(num_bytes: float) -> str:
+    """Formatta i byte in un'unita' leggibile (base 1024), come l'interfaccia web del router."""
+    val = float(num_bytes)
+    for unit in ("B", "KB", "MB", "GB", "TB"):
+        if abs(val) < 1024.0 or unit == "TB":
+            return f"{val:.2f} {unit}"
+        val /= 1024.0
+    return f"{val:.2f} GB"
+
+
+def format_speed(bytes_per_sec: float) -> str:
+    """Formatta la velocita' in KB/s o MB/s."""
+    val = float(bytes_per_sec)
+    if val >= 1024.0 * 1024.0:
+        return f"{val / (1024.0 * 1024.0):.1f} MB/s"
+    return f"{val / 1024.0:.1f} KB/s"
+
+
+def format_progress_bar(percent: float, length: int = 12) -> str:
+    """Restituisce una barra di progresso testuale, es: [████░░░░░░░░] 33.5%."""
+    pct = max(0.0, min(100.0, percent))
+    filled = int(round((pct / 100.0) * length))
+    bar = "█" * filled + "░" * (length - filled)
+    return f"[{bar}] {pct:.1f}%"
+
 
 class TpLinkError(Exception):
     pass
@@ -258,6 +295,73 @@ class MiFiClient:
             "model": status.get("deviceInfo", {}).get("model"),
         }
 
+    def data_usage(self, status: dict[str, Any] | None = None) -> dict[str, Any]:
+        """Statistiche sul consumo dati (giga consumati, totale piano e rimanenti)."""
+        if status is None:
+            status = self.get_status()
+        wan = status.get("wan", {})
+        try:
+            total_bytes = float(wan.get("totalStatistics") or 0)
+        except (ValueError, TypeError):
+            total_bytes = 0.0
+        try:
+            daily_bytes = float(wan.get("dailyStatistics") or 0)
+        except (ValueError, TypeError):
+            daily_bytes = 0.0
+        try:
+            limit_bytes = float(wan.get("limitation") or 0)
+        except (ValueError, TypeError):
+            limit_bytes = 0.0
+
+        has_limit = bool(wan.get("enableDataLimit")) and limit_bytes > 0
+        remaining_bytes = max(0.0, limit_bytes - total_bytes) if has_limit else None
+        usage_percent = (total_bytes / limit_bytes * 100.0) if has_limit and limit_bytes > 0 else None
+
+        net_code = wan.get("networkType")
+        net_name = NETWORK_TYPES.get(net_code, f"Sconosciuto ({net_code})" if net_code is not None else "N/A")
+
+        return {
+            "total_bytes": total_bytes,
+            "total_formatted": format_bytes(total_bytes),
+            "daily_bytes": daily_bytes,
+            "daily_formatted": format_bytes(daily_bytes),
+            "limit_bytes": limit_bytes,
+            "limit_formatted": format_bytes(limit_bytes) if has_limit else "Nessun limite",
+            "has_limit": has_limit,
+            "remaining_bytes": remaining_bytes,
+            "remaining_formatted": format_bytes(remaining_bytes) if remaining_bytes is not None else "N/A",
+            "usage_percent": usage_percent,
+            "progress_bar": format_progress_bar(usage_percent) if usage_percent is not None else "",
+            "operator": wan.get("operatorName", ""),
+            "network_type_code": net_code,
+            "network_type": net_name,
+            "signal_strength": wan.get("signalStrength", 0),
+            "signal_percent": int((wan.get("signalStrength", 0) / 4.0) * 100) if wan.get("signalStrength") is not None else 0,
+            "rx_speed": float(wan.get("rxSpeed") or 0),
+            "rx_speed_formatted": format_speed(float(wan.get("rxSpeed") or 0)),
+            "tx_speed": float(wan.get("txSpeed") or 0),
+            "tx_speed_formatted": format_speed(float(wan.get("txSpeed") or 0)),
+        }
+
+    def summary(self) -> dict[str, Any]:
+        """Riepilogo completo per companion app / widget."""
+        status = self.get_status()
+        battery_info = status.get("battery", {})
+        voltage = battery_info.get("voltage")
+        device_info = status.get("deviceInfo", {})
+        return {
+            "model": device_info.get("model", "M7350"),
+            "firmware": device_info.get("firmwareVer", ""),
+            "battery": {
+                "connected": battery_info.get("connected"),
+                "charging": battery_info.get("charging"),
+                "level": voltage,
+                "voltage": voltage,
+            },
+            "data": self.data_usage(status),
+            "connected_devices": status.get("connectedDevices", {}).get("number", 0),
+        }
+
     def reboot(self) -> dict[str, Any]:
         return self.call("reboot", ACTION["reboot"])
 
@@ -268,7 +372,7 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Client API TP-Link MiFi")
     parser.add_argument("--host", default="192.168.0.1")
     parser.add_argument("--password", required=True)
-    parser.add_argument("command", choices=["battery", "status", "reboot"])
+    parser.add_argument("command", choices=["battery", "status", "data", "summary", "reboot"])
     args = parser.parse_args()
 
     client = MiFiClient(host=args.host, password=args.password)
@@ -277,5 +381,9 @@ if __name__ == "__main__":
         print(json.dumps(client.battery(), indent=2, ensure_ascii=False))
     elif args.command == "status":
         print(json.dumps(client.get_status(), indent=2, ensure_ascii=False))
+    elif args.command == "data":
+        print(json.dumps(client.data_usage(), indent=2, ensure_ascii=False))
+    elif args.command == "summary":
+        print(json.dumps(client.summary(), indent=2, ensure_ascii=False))
     elif args.command == "reboot":
         print(json.dumps(client.reboot(), indent=2, ensure_ascii=False))

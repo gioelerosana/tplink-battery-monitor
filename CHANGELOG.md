@@ -7,6 +7,27 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
+### Added
+
+- Tray companion app for the standalone Rust binary (`--tray`): system tray
+  icon (embedded TP-Link logo, no runtime files), on-click menu with battery,
+  data usage/remaining, daily traffic, network, signal, devices and speed,
+  plus D-Bus desktop notifications.
+- Colored PNG icons generated at runtime for the menu (minimal dependency-free
+  PNG encoder in `src/icons.rs`): battery bar, data usage bar and signal bars.
+- "Powered off" look: the TP-Link logo is desaturated and darkened when the
+  router is unreachable, and the menu switches to a minimal layout.
+- Persistent panel toggles (`Percentuale batteria`, `Mostra GB`, `Notifiche`)
+  saved in `~/.config/tplink-battery-monitor/prefs.json`.
+- Text label next to the tray icon (Ayatana `XAyatanaLabel`) showing the
+  battery percentage and, by default, the remaining GB; toggle with
+  `--show-data-in-panel` / `--no-data-in-panel`.
+- `--install-autostart` / `--uninstall-autostart` to register the companion at
+  graphical login.
+- Vendored `ksni` copy under `vendor/ksni` patched to expose the Ayatana
+  `XAyatanaLabel` property (not supported upstream).
+- Python tray prototype (`tplink_tray.py`).
+
 ## [0.1.0] - 2026-09-26
 
 ### Added

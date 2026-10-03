@@ -1,0 +1,14 @@
+[Unit]
+Description=TP-Link MiFi Tray Monitor (batteria e dati)
+Documentation=https://github.com/gioelerosana/tplink-battery-monitor#readme
+After=graphical-session.target network-online.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+ExecStart=%h/.local/bin/tplink-battery-monitor --tray
+Restart=on-failure
+RestartSec=10
+
+[Install]
+WantedBy=graphical-session.target

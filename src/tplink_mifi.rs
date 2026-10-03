@@ -66,6 +66,88 @@ impl std::error::Error for TpLinkError {}
 
 pub type Result<T> = std::result::Result<T, TpLinkError>;
 
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct BatteryInfo {
+    pub connected: bool,
+    pub charging: bool,
+    pub level: i64,
+    pub voltage: i64,
+    pub model: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DataUsage {
+    pub total_bytes: f64,
+    pub total_formatted: String,
+    pub daily_bytes: f64,
+    pub daily_formatted: String,
+    pub limit_bytes: f64,
+    pub limit_formatted: String,
+    pub has_limit: bool,
+    pub remaining_bytes: Option<f64>,
+    pub remaining_formatted: Option<String>,
+    pub usage_percent: Option<f64>,
+    pub progress_bar: String,
+    pub operator: String,
+    pub network_type_code: i64,
+    pub network_type: String,
+    pub signal_strength: i64,
+    pub signal_percent: i64,
+    pub rx_speed: f64,
+    pub rx_speed_formatted: String,
+    pub tx_speed: f64,
+    pub tx_speed_formatted: String,
+}
+
+#[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
+pub struct DeviceSummary {
+    pub model: String,
+    pub firmware: String,
+    pub battery: BatteryInfo,
+    pub data: DataUsage,
+    pub connected_devices: i64,
+}
+
+pub fn format_bytes(bytes: f64) -> String {
+    let mut val = bytes;
+    for unit in ["B", "KB", "MB", "GB", "TB"] {
+        if val.abs() < 1024.0 || unit == "TB" {
+            return format!("{val:.2} {unit}");
+        }
+        val /= 1024.0;
+    }
+    format!("{val:.2} GB")
+}
+
+pub fn format_speed(bps: f64) -> String {
+    if bps >= 1024.0 * 1024.0 {
+        format!("{:.1} MB/s", bps / (1024.0 * 1024.0))
+    } else {
+        format!("{:.1} KB/s", bps / 1024.0)
+    }
+}
+
+pub fn format_progress_bar(percent: f64, length: usize) -> String {
+    let pct = percent.clamp(0.0, 100.0);
+    let filled = ((pct / 100.0) * length as f64).round() as usize;
+    let empty = length.saturating_sub(filled);
+    format!("[{}{}] {:.1}%", "█".repeat(filled), "░".repeat(empty), pct)
+}
+
+pub fn network_type_name(code: i64) -> &'static str {
+    match code {
+        0 => "Nessun servizio",
+        1 => "2G (GSM)",
+        2 => "3G (WCDMA)",
+        3 => "4G (LTE)",
+        4 => "3G (TD-SCDMA)",
+        5 => "CDMA 1x",
+        6 => "CDMA EVDO",
+        7 => "4G+ (LTE+)",
+        _ => "Sconosciuto",
+    }
+}
+
 pub struct MiFiClient {
     host: String,
     username: String,
@@ -100,6 +182,10 @@ impl MiFiClient {
             rsa_ee: String::new(),
             hash: String::new(),
         }
+    }
+
+    pub fn host(&self) -> &str {
+        &self.host
     }
 
     // ------------------------------------------------------------------ HTTP
@@ -203,10 +289,16 @@ impl MiFiClient {
                 }
             }
         }
-        let raw = B64
-            .decode(text)
-            .map_err(|e| TpLinkError::Protocol(e.to_string()))?;
-        serde_json::from_slice(&raw).map_err(|e| TpLinkError::Protocol(e.to_string()))
+        if text.is_empty() {
+            return Err(TpLinkError::Protocol(
+                "Risposta vuota dal router".to_string(),
+            ));
+        }
+        let raw = B64.decode(text).map_err(|e| {
+            TpLinkError::Protocol(format!("Decodifica base64 fallita: {e} (testo: {text})"))
+        })?;
+        serde_json::from_slice(&raw)
+            .map_err(|e| TpLinkError::Protocol(format!("Decodifica JSON payload fallita: {e}")))
     }
 
     // ------------------------------------------------------------------ login
@@ -271,10 +363,13 @@ impl MiFiClient {
     }
 
     // ---------------------------------------------------------------- richieste
-    pub fn call(&mut self, module: &str, action: i64, data: Option<&Value>) -> Result<Value> {
-        if module != "authenticator" && self.token.is_none() {
-            self.login()?;
-        }
+    fn execute_call(
+        &self,
+        module: &str,
+        action: i64,
+        data: Option<&Value>,
+        token: Option<&str>,
+    ) -> Result<Value> {
         let mut obj = serde_json::Map::new();
         obj.insert("module".to_string(), json!(module));
         obj.insert("action".to_string(), json!(action));
@@ -283,8 +378,8 @@ impl MiFiClient {
                 obj.insert(key.clone(), value.clone());
             }
         }
-        if let Some(token) = &self.token {
-            obj.insert("token".to_string(), json!(token));
+        if let Some(t) = token {
+            obj.insert("token".to_string(), json!(t));
         }
         let payload = self.encrypt_payload(&Value::Object(obj), false)?;
         let path = if module == "authenticator" {
@@ -292,7 +387,32 @@ impl MiFiClient {
         } else {
             WEB_CGI
         };
-        self.decode(&self.post(path, &serde_json::from_str(&payload).unwrap())?)
+        let raw = self.post(path, &serde_json::from_str(&payload).unwrap())?;
+        self.decode(&raw)
+    }
+
+    pub fn call(&mut self, module: &str, action: i64, data: Option<&Value>) -> Result<Value> {
+        if module != "authenticator" && self.token.is_none() {
+            self.login()?;
+        }
+
+        let res = self.execute_call(module, action, data, self.token.as_deref());
+        match res {
+            Ok(v) if v.get("result").and_then(Value::as_i64) == Some(0) => Ok(v),
+            Ok(_v) if module != "authenticator" => {
+                // Token scaduto o invalido: riprova login
+                self.token = None;
+                self.login()?;
+                self.execute_call(module, action, data, self.token.as_deref())
+            }
+            Err(_) if module != "authenticator" => {
+                // Sessione o cifratura compromessa: re-autenticati
+                self.token = None;
+                self.login()?;
+                self.execute_call(module, action, data, self.token.as_deref())
+            }
+            other => other,
+        }
     }
 
     // ---------------------------------------------------------------- comandi
@@ -327,6 +447,156 @@ impl MiFiClient {
             "voltage": voltage,
             "model": model,
         }))
+    }
+
+    /// Statistiche sul consumo dati (giga consumati, totale piano e rimanenti).
+    pub fn data_usage(&mut self, status: Option<&Value>) -> Result<DataUsage> {
+        let fetched_status;
+        let s = match status {
+            Some(val) => val,
+            None => {
+                fetched_status = self.get_status()?;
+                &fetched_status
+            }
+        };
+
+        let wan = s.get("wan");
+        let parse_f64 = |key: &str| -> f64 {
+            wan.and_then(|w| w.get(key))
+                .and_then(|v| {
+                    if let Some(num) = v.as_f64() {
+                        Some(num)
+                    } else if let Some(st) = v.as_str() {
+                        st.parse::<f64>().ok()
+                    } else {
+                        None
+                    }
+                })
+                .unwrap_or(0.0)
+        };
+
+        let total_bytes = parse_f64("totalStatistics");
+        let daily_bytes = parse_f64("dailyStatistics");
+        let limit_bytes = parse_f64("limitation");
+        let has_limit = wan
+            .and_then(|w| w.get("enableDataLimit"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false)
+            && limit_bytes > 0.0;
+
+        let remaining_bytes = if has_limit {
+            Some((limit_bytes - total_bytes).max(0.0))
+        } else {
+            None
+        };
+
+        let usage_percent = if has_limit && limit_bytes > 0.0 {
+            Some((total_bytes / limit_bytes * 100.0).clamp(0.0, 100.0))
+        } else {
+            None
+        };
+
+        let progress_bar = match usage_percent {
+            Some(pct) => format_progress_bar(pct, 12),
+            None => String::new(),
+        };
+
+        let operator = wan
+            .and_then(|w| w.get("operatorName"))
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+
+        let network_type_code = wan
+            .and_then(|w| w.get("networkType"))
+            .and_then(Value::as_i64)
+            .unwrap_or(-1);
+
+        let signal_strength = wan
+            .and_then(|w| w.get("signalStrength"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        let rx_speed = parse_f64("rxSpeed");
+        let tx_speed = parse_f64("txSpeed");
+
+        Ok(DataUsage {
+            total_bytes,
+            total_formatted: format_bytes(total_bytes),
+            daily_bytes,
+            daily_formatted: format_bytes(daily_bytes),
+            limit_bytes,
+            limit_formatted: if has_limit {
+                format_bytes(limit_bytes)
+            } else {
+                "Nessun limite".to_string()
+            },
+            has_limit,
+            remaining_bytes,
+            remaining_formatted: remaining_bytes.map(format_bytes),
+            usage_percent,
+            progress_bar,
+            operator,
+            network_type_code,
+            network_type: network_type_name(network_type_code).to_string(),
+            signal_strength,
+            signal_percent: (signal_strength as f64 / 4.0 * 100.0) as i64,
+            rx_speed,
+            rx_speed_formatted: format_speed(rx_speed),
+            tx_speed,
+            tx_speed_formatted: format_speed(tx_speed),
+        })
+    }
+
+    /// Riepilogo unificato (modello, batteria, dati, dispositivi connessi).
+    pub fn summary(&mut self) -> Result<DeviceSummary> {
+        let status = self.get_status()?;
+        let model = status
+            .pointer("/deviceInfo/model")
+            .and_then(Value::as_str)
+            .unwrap_or("M7350")
+            .to_string();
+        let firmware = status
+            .pointer("/deviceInfo/firmwareVersion")
+            .and_then(Value::as_str)
+            .unwrap_or("")
+            .to_string();
+
+        let battery = status.get("battery");
+        let level = battery
+            .and_then(|b| b.get("voltage"))
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+        let charging = battery
+            .and_then(|b| b.get("charging"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let connected = battery
+            .and_then(|b| b.get("connected"))
+            .and_then(Value::as_bool)
+            .unwrap_or(true);
+
+        let battery_info = BatteryInfo {
+            connected,
+            charging,
+            level,
+            voltage: level,
+            model: model.clone(),
+        };
+
+        let data = self.data_usage(Some(&status))?;
+        let connected_devices = status
+            .pointer("/connectedDevices/number")
+            .and_then(Value::as_i64)
+            .unwrap_or(0);
+
+        Ok(DeviceSummary {
+            model,
+            firmware,
+            battery: battery_info,
+            data,
+            connected_devices,
+        })
     }
 
     pub fn reboot(&mut self) -> Result<Value> {
