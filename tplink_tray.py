@@ -147,6 +147,9 @@ class MiFiTrayApp:
         self._running = True
         self._last_summary: dict[str, Any] | None = None
         self._updating = False
+        self._power_save_enabled = False
+        self._power_save_request: bool | None = None
+        self._suppress_power_signal = False
 
         self.indicator = AppIndicator3.Indicator.new(
             "tplink-battery-monitor",
@@ -230,6 +233,11 @@ class MiFiTrayApp:
         self.item_open_web.connect("activate", self._on_open_web_clicked)
         self.menu.append(self.item_open_web)
 
+        self.item_power_save = Gtk.CheckMenuItem(label="Risparmio energetico")
+        self.item_power_save.set_active(self._power_save_enabled)
+        self.item_power_save.connect("toggled", self._on_toggle_power_save)
+        self.menu.append(self.item_power_save)
+
         self.item_toggle_battery = Gtk.CheckMenuItem(label="Percentuale batteria")
         self.item_toggle_battery.set_active(self.show_battery_in_panel)
         self.item_toggle_battery.connect("toggled", self._on_toggle_battery)
@@ -259,8 +267,20 @@ class MiFiTrayApp:
         while self._running:
             self._updating = True
             try:
+                request = self._power_save_request
+                if request is not None:
+                    self._power_save_request = None
+                    try:
+                        self.client.set_power_save(request)
+                    except Exception:  # noqa: BLE001
+                        self._power_save_request = request  # riprova al prossimo giro
+                        raise
+
                 summary = self.client.summary()
                 GLib.idle_add(self._apply_summary, summary)
+
+                state = self.client.power_save()
+                GLib.idle_add(self._apply_power_save_state, state.get("enable"))
             except Exception as exc:  # noqa: BLE001
                 GLib.idle_add(self._apply_error, str(exc))
             finally:
@@ -269,6 +289,13 @@ class MiFiTrayApp:
             # Attende l'intervallo oppure un trigger manuale
             self._refresh_trigger.wait(timeout=self.poll_interval)
             self._refresh_trigger.clear()
+
+    def _apply_power_save_state(self, enable: Any) -> bool:
+        self._power_save_enabled = bool(enable)
+        self._suppress_power_signal = True
+        self.item_power_save.set_active(self._power_save_enabled)
+        self._suppress_power_signal = False
+        return False
 
     def _apply_summary(self, summary: dict[str, Any]) -> bool:
         self._last_summary = summary
@@ -367,7 +394,7 @@ class MiFiTrayApp:
             self.indicator.set_icon_full("battery-missing-symbolic", "Router non raggiungibile")
         else:
             self.indicator.set_icon("battery-missing-symbolic")
-        self.indicator.set_label(" ?", " 100%")
+        self.indicator.set_label("", " 100%")
         self.item_status.set_label("Router non raggiungibile")
         log(f"Errore connessione router: {err_msg}")
         return False
@@ -442,6 +469,12 @@ class MiFiTrayApp:
         url = self.client.host
         log(f"Apertura interfaccia web: {url}")
         webbrowser.open(url)
+
+    def _on_toggle_power_save(self, item: Gtk.CheckMenuItem) -> None:
+        if self._suppress_power_signal:
+            return
+        self._power_save_request = item.get_active()
+        self._refresh_trigger.set()
 
     def _on_toggle_battery(self, item: Gtk.CheckMenuItem) -> None:
         self.show_battery_in_panel = item.get_active()

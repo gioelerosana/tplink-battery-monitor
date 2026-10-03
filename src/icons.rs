@@ -128,31 +128,29 @@ impl Canvas {
     }
 }
 
-fn bar_png(percent: f64, colour: [u8; 4]) -> Vec<u8> {
-    // Barra volutamente grande: occupa tutta la larghezza dell'icona 16x16.
+/// Barra colorata compatta (16x16) usata come indicatore di colore accanto
+/// alla barra testuale a tutta larghezza, perche' le voci di menu GNOME non
+/// possono colorare il testo.
+fn mini_bar_png(percent: f64, colour: [u8; 4]) -> Vec<u8> {
     let mut canvas = Canvas::new(16, 16);
-    canvas.rect(0, 3, 16, 10, TRACK);
-    let pct = percent.clamp(0.0, 100.0);
-    let filled = ((pct / 100.0) * 16.0).round().clamp(0.0, 16.0) as i32;
+    canvas.rect(0, 4, 16, 8, TRACK);
+    let filled = ((percent.clamp(0.0, 100.0) / 100.0) * 16.0).round() as i32;
     if filled > 0 {
-        canvas.rect(0, 3, filled, 10, colour);
+        canvas.rect(0, 4, filled, 8, colour);
     }
     canvas.to_png()
 }
 
-// ---------------------------------------------------------------- Icone
-
-/// Barra batteria: verde normalmente, rossa sotto il 20%. In carica resta
-/// verde ma il menu lo indica a parole.
-pub fn battery_png(level: Option<i64>, _charging: bool) -> Vec<u8> {
+/// Indicatore batteria: verde, rosso sotto il 20%.
+pub fn battery_png(level: Option<i64>) -> Vec<u8> {
     let percent = level.unwrap_or(0) as f64;
     let colour = if percent < 20.0 { RED } else { GREEN };
-    bar_png(percent, colour)
+    mini_bar_png(percent, colour)
 }
 
-/// Barra consumo dati: sempre blu, per distinguerla a colpo d'occhio.
+/// Indicatore consumo dati: sempre blu.
 pub fn data_bar_png(percent: f64) -> Vec<u8> {
-    bar_png(percent, BLUE)
+    mini_bar_png(percent, BLUE)
 }
 
 /// Quattro tacche di segnale (0-4).
@@ -201,10 +199,10 @@ mod tests {
 
     #[test]
     fn icons_are_valid_png() {
-        assert_png(&battery_png(Some(37), false));
-        assert_png(&battery_png(Some(100), true));
-        assert_png(&data_bar_png(33.6));
         assert_png(&signal_png(3));
+        assert_png(&signal_png(0));
+        assert_png(&battery_png(Some(37)));
+        assert_png(&data_bar_png(33.6));
     }
 
     #[test]
@@ -213,22 +211,5 @@ mod tests {
         let dimmed = argb_powered_off(&source);
         assert!(dimmed[0] < source[0]);
         assert!(dimmed[1] <= source[1]);
-    }
-
-    #[test]
-    #[ignore = "scrive PNG di debug in /tmp/tplink-icons per ispezione manuale"]
-    fn dump_icons() {
-        let dir = std::path::Path::new("/tmp/tplink-icons");
-        std::fs::create_dir_all(dir).unwrap();
-        let samples: [(&str, Vec<u8>); 5] = [
-            ("battery-37.png", battery_png(Some(37), false)),
-            ("battery-90.png", battery_png(Some(90), false)),
-            ("battery-charging.png", battery_png(Some(55), true)),
-            ("bar-33.png", data_bar_png(33.6)),
-            ("signal-3.png", signal_png(3)),
-        ];
-        for (name, bytes) in samples {
-            std::fs::write(dir.join(name), bytes).unwrap();
-        }
     }
 }

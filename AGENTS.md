@@ -21,7 +21,8 @@ Questo repository (`tplink-battery-monitor`) implementa strumenti di monitoraggi
    - `--tray`: applicazione companion residente in background nel pannello di sistema / system tray (KStatusNotifierItem / SNI / DBusMenu), con:
      - icona del logo TP-Link incorporata nel binario (`assets/tplink-*.argb` generati da `assets/tplink.svg`, nessun file a runtime); quando il router non risponde l'icona viene mostrata "spenta" (desaturata e piu' scura);
      - etichetta testuale accanto all'icona (Ayatana `XAyatanaLabel`): percentuale batteria e, di default, i GB rimanenti;
-     - menu compatto al clic con icone PNG colorate generate a runtime (`src/icons.rs`, encoder PNG minimale senza dipendenze): barra batteria (verde, rossa sotto il 20%), barra dati (blu) e tacche segnale; dettagli rete in un sottomenu;
+     - menu compatto al clic: barre testuali a tutta larghezza su una riga dedicata sotto le voci batteria e dati (texture `█░` e `▓▒` per distinguerle) con indicatore colore generato a runtime (verde/rosso batteria, blu dati) e tacche segnale, tramite un encoder PNG minimale senza dipendenze (`src/icons.rs`); dettagli rete in un sottomenu;
+     - toggle `Risparmio energetico` che chiama il modulo router `power_save` (getConfig/setConfig), con retry in caso di caduta di rete transitoria;
      - toggle persistenti (`Percentuale batteria`, `Mostra GB`, `Notifiche`) salvati in `~/.config/tplink-battery-monitor/prefs.json`;
      - notifiche desktop D-Bus per batteria bassa ed eventi di carica.
    - `--show-data-in-panel` / `--no-data-in-panel`: mostra i GB accanto all'icona (default: bollati i GB).

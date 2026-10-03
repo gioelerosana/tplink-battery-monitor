@@ -16,7 +16,7 @@ use std::env;
 use std::fs;
 use std::path::PathBuf;
 use std::process::exit;
-use std::sync::atomic::{AtomicBool, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicI32, Ordering};
 use std::sync::Arc;
 use std::thread::sleep;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
@@ -359,7 +359,8 @@ fn tplink_icon_pixmap(dimmed: bool) -> Vec<ksni::Icon> {
 /// Compone l'etichetta testuale mostrata accanto all'icona nel pannello.
 ///
 /// Esempi: ` 47%`, ` 47% · 266.14 GB rim.`, ` 266.14 GB rim.` (solo dati)
-/// oppure stringa vuota se entrambi i valori sono nascosti.
+/// oppure stringa vuota se entrambi i valori sono nascosti o il router non
+/// risponde (in quel caso parla l'icona scura).
 ///
 /// `show` e' la coppia `(percentuale_batteria, giga)`.
 fn format_panel_label(
@@ -373,7 +374,8 @@ fn format_panel_label(
 ) -> String {
     let (show_battery, show_data) = show;
     if !connected {
-        return " ?".to_string();
+        // Router spento: nessun testo, basta l'icona scura.
+        return String::new();
     }
 
     let battery = match level {
@@ -400,6 +402,21 @@ fn format_panel_label(
         (false, Some(data)) => format!(" {data}"),
         (false, None) => String::new(),
     }
+}
+
+/// Barra testuale a tutta larghezza usata nel menu (una riga dedicata sotto
+/// la voce), per un colpo d'occhio immediato su batteria e consumo.
+///
+/// Il colore non e' disponibile nelle voci di menu GNOME, quindi batteria e
+/// dati usano due texture diverse (`filled`/`empty`) per distinguerle.
+fn menu_bar(percent: f64, length: usize, filled: char, empty: char) -> String {
+    let pct = percent.clamp(0.0, 100.0);
+    let count = ((pct / 100.0) * length as f64).round() as usize;
+    format!(
+        "[{}{}]",
+        filled.to_string().repeat(count),
+        empty.to_string().repeat(length - count)
+    )
 }
 
 fn process_battery_notifications(
@@ -623,8 +640,10 @@ struct MiFiTray {
     tx_speed: String,
     show_data_in_panel: bool,
     show_battery_in_panel: bool,
+    power_save_enabled: Option<bool>,
     notifications_enabled: Arc<AtomicBool>,
     refresh_requested: Arc<AtomicBool>,
+    power_save_request: Arc<AtomicI32>,
 }
 
 impl MiFiTray {
@@ -763,42 +782,63 @@ impl ksni::Tray for MiFiTray {
 
             items.push(MenuItem::Separator);
 
-            // Batteria: icona colorata a soglie.
+            // Batteria: valore, poi barra a tutta larghezza sotto la voce.
+            const BAR_LEN: usize = 22;
             let batt_label = match self.battery_level {
-                Some(lvl) if self.battery_charging => format!("{lvl}% · in carica"),
-                Some(lvl) => format!("{lvl}% · a batteria"),
+                Some(lvl) if self.battery_charging => format!("Batteria {lvl}% · in carica"),
+                Some(lvl) => format!("Batteria {lvl}% · a batteria"),
                 None => "Batteria n/d".to_string(),
             };
             items.push(
                 StandardItem {
                     label: batt_label,
-                    icon_data: icons::battery_png(self.battery_level, self.battery_charging),
                     enabled: false,
                     ..Default::default()
                 }
                 .into(),
             );
+            if let Some(lvl) = self.battery_level {
+                items.push(
+                    StandardItem {
+                        label: menu_bar(lvl as f64, BAR_LEN, '█', '░'),
+                        icon_data: icons::battery_png(self.battery_level),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+            }
 
-            // Dati: barra colorata + percentuale.
+            // Dati: valore, poi barra a tutta larghezza sotto la voce.
             let data_label = if self.has_limit {
                 format!(
-                    "{} / {} · {:.0}%",
+                    "Dati {} / {} · {:.0}%",
                     self.data_total,
                     self.data_limit,
                     self.usage_percent.unwrap_or(0.0)
                 )
             } else {
-                self.data_total.clone()
+                format!("Dati {}", self.data_total)
             };
             items.push(
                 StandardItem {
                     label: data_label,
-                    icon_data: icons::data_bar_png(self.usage_percent.unwrap_or(0.0)),
                     enabled: false,
                     ..Default::default()
                 }
                 .into(),
             );
+            if self.has_limit {
+                items.push(
+                    StandardItem {
+                        label: menu_bar(self.usage_percent.unwrap_or(0.0), BAR_LEN, '▓', '▒'),
+                        icon_data: icons::data_bar_png(self.usage_percent.unwrap_or(0.0)),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into(),
+                );
+            }
 
             items.push(
                 StandardItem {
@@ -889,6 +929,26 @@ impl ksni::Tray for MiFiTray {
             }
             .into(),
         );
+
+        if self.connected {
+            let ps_enabled = self.power_save_enabled.unwrap_or(false);
+            items.push(
+                CheckmarkItem {
+                    label: "Risparmio energetico".into(),
+                    checked: ps_enabled,
+                    activate: Box::new(|this: &mut Self| {
+                        let target = !this.power_save_enabled.unwrap_or(false);
+                        this.power_save_enabled = Some(target);
+                        this.power_save_request
+                            .store(if target { 1 } else { -1 }, Ordering::SeqCst);
+                        // Sveglia il worker per applicare subito il cambio.
+                        this.refresh_requested.store(true, Ordering::SeqCst);
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
 
         items.push(MenuItem::Separator);
 
@@ -981,6 +1041,7 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
     let notify_enabled = prefs.notifications.unwrap_or(notify_enabled);
 
     let refresh_requested = Arc::new(AtomicBool::new(false));
+    let power_save_request = Arc::new(AtomicI32::new(0));
     let notifications_enabled = Arc::new(AtomicBool::new(notify_enabled));
 
     let host_cleaned = client
@@ -1011,8 +1072,10 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
         tx_speed: "0.0 KB/s".to_string(),
         show_data_in_panel,
         show_battery_in_panel,
+        power_save_enabled: None,
         notifications_enabled: notifications_enabled.clone(),
         refresh_requested: refresh_requested.clone(),
+        power_save_request: power_save_request.clone(),
     };
 
     let handle = match tray.spawn() {
@@ -1028,8 +1091,38 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
     let worker_handle = handle.clone();
     let worker_refresh = refresh_requested.clone();
     let worker_notif = notifications_enabled.clone();
+    let worker_power = power_save_request.clone();
 
     let _worker = std::thread::spawn(move || loop {
+        // Applica un'eventuale richiesta di risparmio energetico dal menu,
+        // ritentando in caso di caduta di rete transitoria.
+        let mut power_request = worker_power.swap(0, Ordering::SeqCst);
+        let mut attempts = 0;
+        while power_request != 0 && attempts < 3 {
+            let enable = power_request > 0;
+            match client.set_power_save(enable) {
+                Ok(_) => {
+                    log(&format!(
+                        "Risparmio energetico {}",
+                        if enable { "attivato" } else { "disattivato" }
+                    ));
+                    power_request = 0;
+                }
+                Err(err) => {
+                    attempts += 1;
+                    log(&format!(
+                        "Errore risparmio energetico (tentativo {attempts}/3): {err}"
+                    ));
+                    sleep(Duration::from_secs(2));
+                }
+            }
+        }
+        if power_request != 0 {
+            // Rimetti in coda e risveglia subito il worker per ritentare.
+            worker_power.store(power_request, Ordering::SeqCst);
+            worker_refresh.store(true, Ordering::SeqCst);
+        }
+
         match client.summary() {
             Ok(summary) => {
                 let now_str = chrono::Local::now().format("%H:%M").to_string();
@@ -1073,6 +1166,12 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
                     t.connected = false;
                 });
             }
+        }
+
+        // Stato del risparmio energetico, per la spunta nel menu.
+        if let Ok(config) = client.power_save() {
+            let enabled = config.get("enable").and_then(Value::as_i64).unwrap_or(0) != 0;
+            worker_handle.update(|t| t.power_save_enabled = Some(enabled));
         }
 
         let poll_ticks = (interval_seconds * 10).max(10);
@@ -1187,7 +1286,7 @@ mod tests {
                 None,
                 "1.00 GB"
             ),
-            " ?"
+            ""
         );
     }
 

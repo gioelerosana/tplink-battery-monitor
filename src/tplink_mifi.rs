@@ -602,6 +602,31 @@ impl MiFiClient {
     pub fn reboot(&mut self) -> Result<Value> {
         self.call("reboot", 0, None)
     }
+
+    /// Configurazione del risparmio energetico (`power_save`).
+    pub fn power_save(&mut self) -> Result<Value> {
+        self.call("power_save", 0, None)
+    }
+
+    /// Vero se il risparmio energetico e' attivo.
+    pub fn power_save_enabled(&mut self) -> Result<bool> {
+        let config = self.power_save()?;
+        Ok(config.get("enable").and_then(Value::as_i64).unwrap_or(0) != 0)
+    }
+
+    /// Attiva o disattiva il risparmio energetico preservando gli altri campi
+    /// di configurazione letti dal router.
+    pub fn set_power_save(&mut self, enable: bool) -> Result<Value> {
+        let current = self.power_save()?;
+        let mut data = serde_json::Map::new();
+        for key in ["powerLevel", "autoDisableTime", "wlanOnOff"] {
+            if let Some(value) = current.get(key) {
+                data.insert(key.to_string(), value.clone());
+            }
+        }
+        data.insert("enable".to_string(), json!(if enable { 1 } else { 0 }));
+        self.call("power_save", 1, Some(&Value::Object(data)))
+    }
 }
 
 fn random_token(len: usize) -> String {

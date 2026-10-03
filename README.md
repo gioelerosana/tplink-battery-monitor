@@ -71,12 +71,14 @@ cargo build --release
 ### On-Click Dropdown Menu (compact, with colored icons):
 - **Header**: device model
 - **Connection**: `WEB CoopVoce · 4G (LTE)`
-- **Battery**: `47% · a batteria` with a large green battery bar (red below 20%)
-- **Data**: `134.6 / 400 GB · 33%` with a large blue progress bar
+- **Battery**: `47% · a batteria` followed by a full-width text bar with a green (or red below 20%) color dot
+- **Data**: `134.6 / 400 GB · 33%` followed by a full-width text bar with a blue color dot
 - **Today**: `Oggi 3.9 GB`
 - **Network submenu**: signal bars (colored), connected devices and live speed
-- **Actions**: `Aggiorna`, `Apri router`
+- **Actions**: `Aggiorna`, `Apri router`, `Risparmio energetico` (router power-save toggle, retried across the expected link drop)
 - **Toggles** (persisted in `~/.config/tplink-battery-monitor/prefs.json`): `Percentuale batteria`, `Mostra GB`, `Notifiche`
+
+> Note: GNOME menu entries cannot color text, so the big bars are monochrome and the color is shown by a small dot on the same row. The router drops the link briefly when toggling power saving (expected).
 
 ### Python prototype
 

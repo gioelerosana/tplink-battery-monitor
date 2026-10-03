@@ -13,10 +13,15 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
   icon (embedded TP-Link logo, no runtime files), on-click menu with battery,
   data usage/remaining, daily traffic, network, signal, devices and speed,
   plus D-Bus desktop notifications.
-- Colored PNG icons generated at runtime for the menu (minimal dependency-free
-  PNG encoder in `src/icons.rs`): battery bar, data usage bar and signal bars.
+- Full-width text bars on their own row under the battery and data entries
+  (`█░` and `▓▒` textures), each with a colored color dot (green/red for
+  battery, blue for data) generated at runtime; signal bars as a
+  dependency-free PNG encoder in `src/icons.rs`.
+- Router power-saving toggle (`Risparmio energetico`) via the `power_save`
+  module (getConfig/setConfig), with retry across the expected brief link drop.
 - "Powered off" look: the TP-Link logo is desaturated and darkened when the
-  router is unreachable, and the menu switches to a minimal layout.
+  router is unreachable, and the menu switches to a minimal layout; the panel
+  label is left empty (no placeholder text).
 - Persistent panel toggles (`Percentuale batteria`, `Mostra GB`, `Notifiche`)
   saved in `~/.config/tplink-battery-monitor/prefs.json`.
 - Text label next to the tray icon (Ayatana `XAyatanaLabel`) showing the

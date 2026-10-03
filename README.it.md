@@ -71,12 +71,14 @@ cargo build --release
 ### Funzionalità del Menu al Clic (compatto, con icone colorate):
 - **Intestazione**: modello del router
 - **Connessione**: `WEB CoopVoce · 4G (LTE)`
-- **Batteria**: `47% · a batteria` con barra batteria grande verde (rossa sotto il 20%)
-- **Dati**: `134.6 / 400 GB · 33%` con barra di avanzamento grande blu
+- **Batteria**: `47% · a batteria` seguita da una barra testuale a tutta larghezza con un pallino colore verde (rosso sotto il 20%)
+- **Dati**: `134.6 / 400 GB · 33%` seguita da una barra testuale a tutta larghezza con un pallino colore blu
 - **Oggi**: `Oggi 3.9 GB`
 - **Sottomenu Rete**: tacche segnale (colorate), dispositivi connessi e velocità live
-- **Azioni**: `Aggiorna`, `Apri router`
+- **Azioni**: `Aggiorna`, `Apri router`, `Risparmio energetico` (toggle power save del router, con retry durante il drop di rete atteso)
 - **Toggle** (persistenti in `~/.config/tplink-battery-monitor/prefs.json`): `Percentuale batteria`, `Mostra GB`, `Notifiche`
+
+> Nota: le voci di menu GNOME non possono colorare il testo, quindi le barre grandi sono monocromatiche e il colore e' mostrato da un pallino sulla stessa riga. Il router perde il collegamento per qualche secondo quando si cambia il risparmio energetico (comportamento atteso).
 
 ### Prototipo Python
 

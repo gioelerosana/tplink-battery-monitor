@@ -365,6 +365,21 @@ class MiFiClient:
     def reboot(self) -> dict[str, Any]:
         return self.call("reboot", ACTION["reboot"])
 
+    def power_save(self) -> dict[str, Any]:
+        """Configurazione del risparmio energetico (`power_save`)."""
+        return self.call("power_save", 0)
+
+    def set_power_save(self, enable: bool) -> dict[str, Any]:
+        """Attiva o disattiva il risparmio energetico preservando gli altri campi."""
+        current = self.power_save()
+        data = {
+            key: current[key]
+            for key in ("powerLevel", "autoDisableTime", "wlanOnOff")
+            if key in current
+        }
+        data["enable"] = 1 if enable else 0
+        return self.call("power_save", 1, data)
+
 
 if __name__ == "__main__":
     import argparse
