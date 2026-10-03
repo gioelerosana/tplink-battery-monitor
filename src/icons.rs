@@ -128,29 +128,35 @@ impl Canvas {
     }
 }
 
-/// Barra colorata compatta (16x16) usata come indicatore di colore accanto
-/// alla barra testuale a tutta larghezza, perche' le voci di menu GNOME non
-/// possono colorare il testo.
-fn mini_bar_png(percent: f64, colour: [u8; 4]) -> Vec<u8> {
+/// Pallino pieno colorato (16x16) usato come indicatore accanto alla barra
+/// testuale a tutta larghezza: le voci di menu GNOME non possono colorare
+/// il testo.
+fn dot_png(colour: [u8; 4]) -> Vec<u8> {
     let mut canvas = Canvas::new(16, 16);
-    canvas.rect(0, 4, 16, 8, TRACK);
-    let filled = ((percent.clamp(0.0, 100.0) / 100.0) * 16.0).round() as i32;
-    if filled > 0 {
-        canvas.rect(0, 4, filled, 8, colour);
+    let center = 7.5_f32;
+    let radius = 6.0_f32;
+    for y in 0..16 {
+        for x in 0..16 {
+            let dx = x as f32 + 0.5 - center;
+            let dy = y as f32 + 0.5 - center;
+            if dx * dx + dy * dy <= radius * radius {
+                canvas.set(x, y, colour);
+            }
+        }
     }
     canvas.to_png()
 }
 
 /// Indicatore batteria: verde, rosso sotto il 20%.
-pub fn battery_png(level: Option<i64>) -> Vec<u8> {
+pub fn battery_dot_png(level: Option<i64>) -> Vec<u8> {
     let percent = level.unwrap_or(0) as f64;
     let colour = if percent < 20.0 { RED } else { GREEN };
-    mini_bar_png(percent, colour)
+    dot_png(colour)
 }
 
 /// Indicatore consumo dati: sempre blu.
-pub fn data_bar_png(percent: f64) -> Vec<u8> {
-    mini_bar_png(percent, BLUE)
+pub fn data_dot_png() -> Vec<u8> {
+    dot_png(BLUE)
 }
 
 /// Quattro tacche di segnale (0-4).
@@ -201,8 +207,8 @@ mod tests {
     fn icons_are_valid_png() {
         assert_png(&signal_png(3));
         assert_png(&signal_png(0));
-        assert_png(&battery_png(Some(37)));
-        assert_png(&data_bar_png(33.6));
+        assert_png(&battery_dot_png(Some(37)));
+        assert_png(&data_dot_png());
     }
 
     #[test]

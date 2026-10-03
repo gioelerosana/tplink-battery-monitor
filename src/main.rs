@@ -801,7 +801,7 @@ impl ksni::Tray for MiFiTray {
                 items.push(
                     StandardItem {
                         label: menu_bar(lvl as f64, BAR_LEN, '█', '░'),
-                        icon_data: icons::battery_png(self.battery_level),
+                        icon_data: icons::battery_dot_png(self.battery_level),
                         enabled: false,
                         ..Default::default()
                     }
@@ -832,7 +832,7 @@ impl ksni::Tray for MiFiTray {
                 items.push(
                     StandardItem {
                         label: menu_bar(self.usage_percent.unwrap_or(0.0), BAR_LEN, '▓', '▒'),
-                        icon_data: icons::data_bar_png(self.usage_percent.unwrap_or(0.0)),
+                        icon_data: icons::data_dot_png(),
                         enabled: false,
                         ..Default::default()
                     }
