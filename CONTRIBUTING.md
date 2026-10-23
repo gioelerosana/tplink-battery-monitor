@@ -31,12 +31,15 @@ cargo build --release
 
 ## Releasing
 
+Versions are `YY.MINOR.PATCH`: the first number is the year (26 = 2026) and
+only changes with the year; bump MINOR for features and PATCH for fixes.
+
 Bump `version` in `Cargo.toml`, move the `Unreleased` changelog entries under
 `## [X.Y.Z] - YYYY-MM-DD`, commit, then push a matching tag:
 
 ```bash
-git tag v0.0.2
-git push origin main v0.0.2
+git tag v26.0.2
+git push origin main v26.0.2
 ```
 
 The `Release` workflow checks that the tag matches `Cargo.toml`, runs the

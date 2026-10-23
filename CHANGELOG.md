@@ -3,11 +3,12 @@
 All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
-and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
+and versions follow `YY.MINOR.PATCH`: the first number is the year (26 = 2026),
+the other two are bumped within the year.
 
 ## [Unreleased]
 
-## [0.0.1] - 2026-10-23
+## [26.0.1] - 2026-10-23
 
 First public release.
 
@@ -30,5 +31,5 @@ First public release.
   + MD5 login), shipped as a single static binary with no runtime
   dependencies.
 
-[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v0.0.1...HEAD
-[0.0.1]: https://github.com/gioelerosana/tplink-battery-monitor/releases/tag/v0.0.1
+[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v26.0.1...HEAD
+[26.0.1]: https://github.com/gioelerosana/tplink-battery-monitor/releases/tag/v26.0.1

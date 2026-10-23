@@ -1,6 +1,6 @@
 name: Release
 
-# Un tag di versione (es. v0.0.1 oppure 0.0.1) costruisce l'AppImage e la
+# Un tag di versione (es. v26.0.1 oppure 26.0.1) costruisce l'AppImage e la
 # pubblica come release GitHub. Il tag deve coincidere con `version` in
 # Cargo.toml.
 on:

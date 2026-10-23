@@ -38,6 +38,7 @@ Questo repository (`tplink-battery-monitor`) implementa strumenti di monitoraggi
    - Per le modifiche a installazione o packaging, ricostruire l'AppImage con `./packaging/build-appimage.sh`.
 
 6. **Rilascio (tag di versione)**:
+   - Schema di versione `AA.MINOR.PATCH`: il primo numero e' l'anno a due cifre (26 = 2026) e cambia solo con l'anno; durante l'anno si incrementano MINOR (nuove funzionalita') e PATCH (correzioni). La prima release e' `26.0.1`. Esempio di tag: `v26.0.1`.
    - Una release si pubblica solo con un tag: il push di `vX.Y.Z` (o `X.Y.Z`) avvia `.github/workflows/release.yml`, che verifica che il tag coincida con `version` in `Cargo.toml`, esegue i test, costruisce l'AppImage e crea la release GitHub con l'AppImage, il suo `.sha256` e la sezione `## [X.Y.Z]` del CHANGELOG come note.
    - Procedura: aggiornare `version` in `Cargo.toml` (e `Cargo.lock` con `cargo check`), spostare le voci di `## [Unreleased]` in `## [X.Y.Z] - AAAA-MM-GG` nel CHANGELOG aggiornando i link in fondo, fare commit, poi `git tag vX.Y.Z` e `git push origin main vX.Y.Z`.
    - Il nome dell'asset resta fisso (`tplink-battery-monitor-x86_64.AppImage`), cosi' il link `releases/latest/download/...` funziona sempre.
