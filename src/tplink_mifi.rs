@@ -1,6 +1,6 @@
 //! Client minimale per l'API web dei router mobili TP-Link (es. M7350).
 //!
-//! Traduzione 1:1 di `tplink_mifi.py`. Reverse engineered dall'interfaccia
+//! Reverse engineered dall'interfaccia
 //! web del router (`js/tpweb.min.js`, `js/libs.min.js`). L'API e' JSON su due
 //! endpoint:
 //!
@@ -49,6 +49,7 @@ type AesDec = cbc::Decryptor<Aes128>;
 pub enum TpLinkError {
     Http(String),
     Auth(String),
+    WrongPassword,
     Protocol(String),
 }
 
@@ -57,6 +58,7 @@ impl fmt::Display for TpLinkError {
         match self {
             TpLinkError::Http(m) => write!(f, "HTTP: {m}"),
             TpLinkError::Auth(m) => write!(f, "Autenticazione: {m}"),
+            TpLinkError::WrongPassword => write!(f, "Autenticazione: password del router errata"),
             TpLinkError::Protocol(m) => write!(f, "Protocollo: {m}"),
         }
     }
@@ -343,7 +345,7 @@ impl MiFiClient {
         let resp = self.decode(&self.post(AUTH_CGI, &serde_json::from_str(&payload).unwrap())?)?;
         let result = resp.get("result").and_then(Value::as_i64).unwrap_or(-999);
         if result == 1 {
-            return Err(TpLinkError::Auth("Password del router errata".to_string()));
+            return Err(TpLinkError::WrongPassword);
         }
         if result != 0 {
             return Err(TpLinkError::Auth(format!(

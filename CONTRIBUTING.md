@@ -1,67 +1,57 @@
 # Contributing
 
-Thanks for your interest! This is a small project; issues and pull requests are
-welcome.
+Issues and pull requests are welcome.
 
 ## Ground rules
 
 - **Never commit secrets.** The router password lives in `.env`, which is
   git-ignored. Do not hard-code credentials, even in tests or examples.
-- Keep the **Rust and Python implementations in sync**. They are intended to be
-  a 1:1 translation of the same behaviour and wire format. If you change the
-  protocol handling or the notification state machine in one, change the other
-  too.
-- Keep the API client (`tplink_mifi`) free of notification/threshold logic, and
-  the monitor free of crypto/HTTP details.
-
-## Prerequisites
-
-- Rust stable (`cargo`)
-- Python 3.9+ with `cryptography`
+- Keep the API client (`src/tplink_mifi.rs`) free of notification/threshold
+  logic, and the monitor (`src/main.rs`) free of crypto/HTTP details.
+- No new runtime dependencies: the product is a single static binary.
 
 ## Build and run
 
 ```bash
-# Rust
 cargo build --release
-./target/release/tplink-battery-monitor --once --no-notify
+./target/release/tplink-battery-monitor --data
 
-# Python
-pip install -r requirements.txt
-python3 monitor.py --once --no-notify
+# AppImage (static musl build, output in dist/)
+./packaging/build-appimage.sh
 ```
 
 ## Checks before opening a PR
 
 ```bash
-# Rust
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
+cargo test
 cargo build --release
-
-# Python
-python3 -m py_compile tplink_mifi.py monitor.py
 ```
 
-The CI workflow (`.github/workflows/ci.yml`) runs the same checks.
+## Releasing
+
+Bump `version` in `Cargo.toml`, move the `Unreleased` changelog entries under
+`## [X.Y.Z] - YYYY-MM-DD`, commit, then push a matching tag:
+
+```bash
+git tag v0.0.2
+git push origin main v0.0.2
+```
+
+The `Release` workflow checks that the tag matches `Cargo.toml`, runs the
+tests, builds the AppImage and publishes a GitHub release with it.
 
 ## Testing without hardware
 
 The monitor's decision logic only needs a battery reading. You can simulate
-charge transitions by editing the state file directly
+charge transitions by editing the state file
 (`~/.cache/tplink-battery-monitor/state.json`, or `TP_BATTERY_STATE`) and then
-running with `--once --no-notify` to observe the logs. For example, set
-`"charging": true` while the router is not charging, and the next run will log
-`Carica interrotta`.
+running with `--once --no-notify`. For example, set `"charging": true` while
+the router is not charging, and the next run logs `Carica interrotta`.
 
 ## Reporting issues
 
-When opening an issue, please include:
-
-- router model and firmware version (the `status` response has
-  `deviceInfo.model` / `deviceInfo.firmwareVer`),
-- the OS and how you run the tool (systemd timer, cron, manual),
-- relevant log lines.
-
-Do **not** paste your admin password, the session token, or the contents of
-`.env`.
+Include the router model and firmware version, your distro and desktop, and
+relevant log lines (`journalctl --user -u tplink-battery-monitor`). Do **not**
+paste your admin password, the session token, or the contents of `.env`.

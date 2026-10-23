@@ -9,8 +9,10 @@
 //!     tplink-battery-monitor --tray --no-data-in-panel  # solo percentuale accanto all'icona
 //!     tplink-battery-monitor --data                # statistiche consumo dati ed esci
 //!     tplink-battery-monitor --once                # un singolo controllo (per systemd timer)
-//!     tplink-battery-monitor --install-autostart   # configura l'avvio automatico al login
-//!     tplink-battery-monitor --uninstall-autostart # rimuove l'avvio automatico
+//!     tplink-battery-monitor --install             # installa come servizio utente al login
+//!     tplink-battery-monitor --uninstall           # rimuove servizio ed eseguibile installato
+//!
+//! L'AppImage avviata senza argomenti equivale a `--install`.
 
 use std::env;
 use std::fs;
@@ -27,7 +29,9 @@ use serde_json::{json, Value};
 
 use tplink_mifi::MiFiClient;
 
+mod dialog;
 mod icons;
+mod install;
 
 struct Config {
     host: String,
@@ -38,8 +42,8 @@ struct Config {
     once: bool,
     data: bool,
     tray: bool,
-    install_autostart: bool,
-    uninstall_autostart: bool,
+    install: bool,
+    uninstall: bool,
     no_notify: bool,
     notify_recovery: bool,
     show_data_in_panel: bool,
@@ -54,7 +58,7 @@ fn log(message: &str) {
     );
 }
 
-fn home_dir() -> PathBuf {
+pub(crate) fn home_dir() -> PathBuf {
     PathBuf::from(env::var("HOME").unwrap_or_else(|_| ".".to_string()))
 }
 
@@ -94,74 +98,6 @@ fn save_prefs(prefs: &Prefs) {
     }
     if let Ok(text) = serde_json::to_string_pretty(prefs) {
         let _ = fs::write(path, text);
-    }
-}
-
-fn autostart_files() -> (PathBuf, PathBuf) {
-    let autostart_dir = home_dir().join(".config/autostart");
-    (
-        autostart_dir.join("tplink-battery-monitor.desktop"),
-        autostart_dir.join("tplink-tray.desktop"),
-    )
-}
-
-fn install_autostart() {
-    let (target, legacy) = autostart_files();
-    if let Some(parent) = target.parent() {
-        let _ = fs::create_dir_all(parent);
-    }
-    if legacy.is_file() {
-        let _ = fs::remove_file(&legacy);
-    }
-
-    let exe = env::current_exe()
-        .map(|p| p.to_string_lossy().to_string())
-        .unwrap_or_else(|_| "tplink-battery-monitor".to_string());
-
-    let content = format!(
-        "[Desktop Entry]\n\
-         Type=Application\n\
-         Name=TP-Link MiFi Monitor\n\
-         Comment=Monitor della batteria e consumo dati del router TP-Link M7350\n\
-         Exec={exe} --tray\n\
-         Icon=battery-good-symbolic\n\
-         Terminal=false\n\
-         Categories=Utility;System;\n\
-         StartupNotify=false\n\
-         X-GNOME-Autostart-enabled=true\n"
-    );
-
-    match fs::write(&target, content) {
-        Ok(_) => {
-            println!("File di avvio automatico installato con successo:");
-            println!("  {}", target.display());
-            println!("L'applicazione verra' avviata automaticamente al prossimo login.");
-        }
-        Err(e) => {
-            eprintln!(
-                "Errore creazione file autostart in {}: {e}",
-                target.display()
-            );
-            exit(1);
-        }
-    }
-}
-
-fn uninstall_autostart() {
-    let (target, legacy) = autostart_files();
-    let mut removed = false;
-    if target.is_file() {
-        let _ = fs::remove_file(&target);
-        println!("Rimosso: {}", target.display());
-        removed = true;
-    }
-    if legacy.is_file() {
-        let _ = fs::remove_file(&legacy);
-        println!("Rimosso: {}", legacy.display());
-        removed = true;
-    }
-    if !removed {
-        println!("Nessun file di avvio automatico trovato.");
     }
 }
 
@@ -209,8 +145,9 @@ Opzioni principali:
   --tray                  Avvia l'app companion nella system tray / background
   --data                  Mostra il riepilogo dati e batteria ed esci
   --once                  Esegui un singolo controllo (per systemd timer)
-  --install-autostart     Installa l'avvio automatico al login grafico
-  --uninstall-autostart   Rimuove l'avvio automatico al login grafico
+  --install               Installa in ~/.local/bin come servizio utente avviato al login
+                          (azione predefinita avviando l'AppImage senza argomenti)
+  --uninstall             Rimuove servizio, avvio automatico ed eseguibile installato
 
 Parametri di connessione e soglia:
   --host <HOST>           Indirizzo IP router (default: 192.168.0.1 o TPLINK_HOST)
@@ -224,6 +161,7 @@ Parametri di connessione e soglia:
   --no-data-in-panel      Mostra solo la percentuale accanto all'icona
   --show-battery-in-panel Mostra la percentuale batteria accanto all'icona (default)
   --no-battery-in-panel   Nasconde la percentuale batteria accanto all'icona
+  -V, --version           Mostra la versione
   -h, --help              Mostra questo messaggio di aiuto
 "
     );
@@ -239,8 +177,8 @@ fn parse_args() -> Config {
         once: false,
         data: false,
         tray: false,
-        install_autostart: false,
-        uninstall_autostart: false,
+        install: false,
+        uninstall: false,
         no_notify: false,
         notify_recovery: false,
         show_data_in_panel: env_bool("SHOW_DATA_IN_PANEL", true),
@@ -265,14 +203,18 @@ fn parse_args() -> Config {
             "--once" => config.once = true,
             "--data" => config.data = true,
             "--tray" => config.tray = true,
-            "--install-autostart" => config.install_autostart = true,
-            "--uninstall-autostart" => config.uninstall_autostart = true,
+            "--install" | "--install-autostart" => config.install = true,
+            "--uninstall" | "--uninstall-autostart" => config.uninstall = true,
             "--no-notify" => config.no_notify = true,
             "--notify-recovery" => config.notify_recovery = true,
             "--show-data-in-panel" => config.show_data_in_panel = true,
             "--no-data-in-panel" => config.show_data_in_panel = false,
             "--show-battery-in-panel" => config.show_battery_in_panel = true,
             "--no-battery-in-panel" => config.show_battery_in_panel = false,
+            "-V" | "--version" => {
+                println!("tplink-battery-monitor {}", env!("CARGO_PKG_VERSION"));
+                exit(0);
+            }
             "-h" | "--help" => {
                 print_help();
                 exit(0);
@@ -1200,15 +1142,16 @@ fn main() {
     load_dotenv(&PathBuf::from(".env"));
     load_dotenv(&home_dir().join(".config/tplink-battery-monitor/.env"));
 
+    let launched_as_appimage = env::var_os("APPIMAGE").is_some() && env::args().len() == 1;
     let config = parse_args();
 
-    if config.install_autostart {
-        install_autostart();
+    if config.install || launched_as_appimage {
+        install::install(launched_as_appimage);
         return;
     }
 
-    if config.uninstall_autostart {
-        uninstall_autostart();
+    if config.uninstall {
+        install::uninstall();
         return;
     }
 

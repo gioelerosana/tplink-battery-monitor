@@ -1,0 +1,9 @@
+[Desktop Entry]
+Type=Application
+Name=TP-Link MiFi Monitor
+Comment=Batteria e consumo dati del router TP-Link nella barra di sistema
+Exec=tplink-battery-monitor
+Icon=tplink-battery-monitor
+Terminal=false
+NoDisplay=true
+Categories=Utility;

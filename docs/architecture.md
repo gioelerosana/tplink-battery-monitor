@@ -8,7 +8,7 @@ router.
 
 ```
         ┌──────────────────────────────────────────────────────────┐
-        │ monitor.py / src/main.rs   (application layer)           │
+        │ src/main.rs   (application layer)                        │
         │  - config (.env + args)                                   │
         │  - polling loop / oneshot                                 │
         │  - state machine: threshold, cooldown, charging events    │
@@ -18,7 +18,7 @@ router.
                                     │  battery() / get_status()
                                     ▼
         ┌──────────────────────────────────────────────────────────┐
-        │ tplink_mifi.py / src/tplink_mifi.rs   (transport layer)  │
+        │ src/tplink_mifi.rs   (transport layer)                   │
         │  - HTTP to 192.168.0.1                                    │
         │  - AES+RSA login, session token                           │
         │  - JSON envelope encode/decode                            │
@@ -32,22 +32,20 @@ router.
 
 The guiding rule: the client knows nothing about thresholds or notifications,
 and the monitor knows nothing about AES/RSA. Each layer has a single
-responsibility. The Rust and Python sources are kept as close to a 1:1
-translation as practical (same function names, same control flow, same wire
-format).
+responsibility.
 
 ## Transport layer — `MiFiClient`
 
 Reimplements the protocol the browser would use, without a browser:
 
-1. **Handshake** (`_auth_load` / `auth_load`): fetch `nonce`, `rsaMod`,
+1. **Handshake** (`auth_load`): fetch `nonce`, `rsaMod`,
    `rsaPubKey`, `seqNum`.
 2. **Key material** (`login`): generate a random AES-128 key/IV, compute
    `hash = MD5("admin" + password)`.
-3. **Sign & encrypt** (`_encrypt_payload` / `encrypt_payload`): AES-128-CBC
+3. **Sign & encrypt** (`encrypt_payload`): AES-128-CBC
    (PKCS#7) the JSON, then produce the chunked RSA-512 signature. The signed
    string differs for login vs. normal calls.
-4. **Tolerant decode** (`_decode` / `decode`): the router mixes plain JSON,
+4. **Tolerant decode** (`decode`): the router mixes plain JSON,
    base64-of-JSON and base64-of-AES; a single function normalizes all three.
 
 The session `token` returned by login is stored on the client and re-injected
@@ -82,15 +80,11 @@ first run the `charging` key is absent, so charge transitions are recorded
 without emitting spurious notifications.
 
 `check_once` is the core: read → evaluate → notify → persist. The `main`
-function drives it either once (`--once`, used by the systemd timer) or in a
+function drives it either once (`--once`) or in a
 loop with `sleep(interval)`.
 
-Notification delivery is isolated:
-
-- Rust uses `notify-rust` (native D-Bus, `org.freedesktop.Notifications`).
-- Python shells out to `notify-send`.
-
-Both degrade gracefully (log only) when the notification service is
+Notification delivery is isolated: `notify-rust` talks native D-Bus
+(`org.freedesktop.Notifications`) and degrades gracefully (log only) when the notification service is
 unavailable, which also makes `--no-notify` a natural test mode.
 
 ## Configuration and deployment
@@ -100,19 +94,23 @@ unavailable, which also makes `--no-notify` a natural test mode.
   `~/.config/tplink-battery-monitor/.env`.
 - **Secrets**: the password lives only in `.env`, which is git-ignored.
   The sources contain no credentials.
-- **Deployment**: the Rust binary is installed to `~/.local/bin` and run by a
-  systemd **user** `oneshot` service triggered by a 5-minute `timer`
-  (`AccuracySec=30s` to coalesce wakeups). A user service is required so the
-  D-Bus notification reaches the graphical session.
+- **Deployment**: a static (musl) binary packaged as an AppImage. Launched
+  without arguments it runs `--install` (`src/install.rs`): copies itself to
+  `~/.local/bin/tplink-battery-monitor`, asks for the router password if
+  missing, and registers a systemd **user** service bound to
+  `graphical-session.target` that runs `--tray`. A user service is required
+  so the tray and the D-Bus notifications reach the graphical session. Without
+  systemd user sessions it falls back to `~/.config/autostart`. No entry is
+  added to the application menu.
 
 ## Design decisions
 
 | Decision | Reason |
 | --- | --- |
 | Two separate modules | Testability: exercise the API without notifying, and the threshold logic with `--no-notify`. |
-| Duplicate implementations (Rust + Python) | A single self-contained binary for deployment; a dependency-free-ish script for inspection. |
+| Single static binary in an AppImage | One file to download, no runtime dependencies, works across distributions. |
 | Chunked RSA-512 signature | A real firmware constraint, replicated faithfully rather than worked around. |
 | Tolerant decode | The router mixes response encodings; one place normalizes them. |
 | Persistent state | Correct cooldown/hysteresis across restarts and timer ticks. |
 | Pluggable notification backend | The delivery channel can change without touching the logic. |
-| Timer cadence decoupled from alert cadence | Battery changes slowly; the timer can stay at 5 minutes while cooldown controls notification frequency. |
+| Poll cadence decoupled from alert cadence | Battery changes slowly; polling can stay at 5 minutes while cooldown controls notification frequency. |

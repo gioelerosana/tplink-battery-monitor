@@ -7,49 +7,28 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 
 ## [Unreleased]
 
-### Added
+## [0.0.1] - 2026-10-23
 
-- Tray companion app for the standalone Rust binary (`--tray`): system tray
-  icon (embedded TP-Link logo, no runtime files), on-click menu with battery,
-  data usage/remaining, daily traffic, network, signal, devices and speed,
-  plus D-Bus desktop notifications.
-- Full-width text bars on their own row under the battery and data entries
-  (`█░` and `▓▒` textures), each with a colored color dot (green/red for
-  battery, blue for data) generated at runtime; signal bars as a
-  dependency-free PNG encoder in `src/icons.rs`.
-- Router power-saving toggle (`Risparmio energetico`) via the `power_save`
-  module (getConfig/setConfig), with retry across the expected brief link drop.
-- "Powered off" look: the TP-Link logo is desaturated and darkened when the
-  router is unreachable, and the menu switches to a minimal layout; the panel
-  label is left empty (no placeholder text).
-- Persistent panel toggles (`Percentuale batteria`, `Mostra GB`, `Notifiche`)
-  saved in `~/.config/tplink-battery-monitor/prefs.json`.
-- Text label next to the tray icon (Ayatana `XAyatanaLabel`) showing the
-  battery percentage and, by default, the remaining GB; toggle with
-  `--show-data-in-panel` / `--no-data-in-panel`.
-- `--install-autostart` / `--uninstall-autostart` to register the companion at
-  graphical login.
-- Vendored `ksni` copy under `vendor/ksni` patched to expose the Ayatana
-  `XAyatanaLabel` property (not supported upstream).
-- Python tray prototype (`tplink_tray.py`).
-
-## [0.1.0] - 2026-09-26
+First public release.
 
 ### Added
 
-- Reverse-engineered client for the TP-Link MiFi JSON API (`/cgi-bin/auth_cgi`,
-  `/cgi-bin/web_cgi`) handling the AES-128-CBC + chunked RSA-512 + MD5 "GDPR"
-  authentication flow.
-- Battery monitoring with a configurable threshold (default 20%).
-- Low-battery notification, suppressed while charging.
-- Charge-event notifications: charge started, charge complete (100%), charge
-  interrupted (unplugged before 100%).
-- Notification cooldown and persistent state across runs.
-- Rust implementation producing a single binary, with native D-Bus
-  notifications (`notify-rust`).
-- Python implementation with `notify-send` notifications.
-- systemd user `oneshot` service + 5-minute timer.
-- Documentation: protocol write-up and architecture notes.
+- AppImage with a graphical installer: opening it copies the app to
+  `~/.local/bin`, asks for the router password and checks it against the
+  router, registers a systemd user service started at every login (XDG
+  autostart as fallback) and shows each step in a progress window, then a
+  summary. Opening it again offers Aggiorna / Disinstalla. No application
+  menu entry is created. Dialogs use zenity or kdialog, text in a terminal.
+- System tray app (`--tray`) with the TP-Link logo and a label showing the
+  battery percentage and remaining GB. The click menu shows battery and data
+  bars, daily traffic, network, signal, devices, speed and a router
+  power-saving toggle. The logo turns grey when the router is unreachable.
+- Desktop notifications for low battery and for charge started, completed and
+  interrupted, with cooldown and state kept across restarts.
+- Terminal summary (`--data`), single check (`--once`), `--version`.
+- Client for the router's undocumented JSON API (AES-128-CBC + chunked RSA-512
+  + MD5 login), shipped as a single static binary with no runtime
+  dependencies.
 
-[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v0.1.0...HEAD
-[0.1.0]: https://github.com/gioelerosana/tplink-battery-monitor/releases/tag/v0.1.0
+[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v0.0.1...HEAD
+[0.0.1]: https://github.com/gioelerosana/tplink-battery-monitor/releases/tag/v0.0.1

@@ -1,0 +1,75 @@
+name: Release
+
+# Un tag di versione (es. v0.0.1 oppure 0.0.1) costruisce l'AppImage e la
+# pubblica come release GitHub. Il tag deve coincidere con `version` in
+# Cargo.toml.
+on:
+  push:
+    tags:
+      - "v[0-9]+.[0-9]+.[0-9]+"
+      - "[0-9]+.[0-9]+.[0-9]+"
+
+permissions:
+  contents: write
+
+jobs:
+  appimage:
+    name: AppImage
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v5
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: x86_64-unknown-linux-musl
+
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Check tag matches Cargo.toml
+        id: version
+        run: |
+          tag="${GITHUB_REF_NAME#v}"
+          crate="$(sed -n 's/^version = "\(.*\)"$/\1/p' Cargo.toml | head -n1)"
+          if [ "$tag" != "$crate" ]; then
+            echo "::error::Il tag $GITHUB_REF_NAME non corrisponde alla versione $crate in Cargo.toml"
+            exit 1
+          fi
+          echo "version=$crate" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: cargo test
+
+      - name: Build AppImage
+        run: ./packaging/build-appimage.sh
+
+      - name: Checksum
+        working-directory: dist
+        run: sha256sum tplink-battery-monitor-x86_64.AppImage > tplink-battery-monitor-x86_64.AppImage.sha256
+
+      - name: Release notes
+        run: |
+          # Sezione "## [x.y.z]" del CHANGELOG fino alla successiva "## [".
+          awk -v v="${{ steps.version.outputs.version }}" '
+            $0 ~ "^## \\[" v "\\]" { found = 1; next }
+            found && /^## \[/ { exit }
+            found { print }
+          ' CHANGELOG.md > notes.md
+          if [ ! -s notes.md ]; then
+            echo "Release ${{ steps.version.outputs.version }}" > notes.md
+          fi
+          cat >> notes.md <<'NOTES'
+
+          ## Install
+
+          Download `tplink-battery-monitor-x86_64.AppImage`, make it executable and double-click it.
+          NOTES
+
+      - name: Publish release
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          gh release create "$GITHUB_REF_NAME" \
+            --title "v${{ steps.version.outputs.version }}" \
+            --notes-file notes.md \
+            dist/tplink-battery-monitor-x86_64.AppImage \
+            dist/tplink-battery-monitor-x86_64.AppImage.sha256
