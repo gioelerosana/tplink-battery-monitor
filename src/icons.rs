@@ -177,7 +177,7 @@ pub fn signal_png(strength: i64) -> Vec<u8> {
 /// piu' scura e semi-trasparente).
 pub fn argb_powered_off(data: &[u8]) -> Vec<u8> {
     let mut out = data.to_vec();
-    for pixel in out.chunks_exact_mut(4) {
+    for pixel in out.as_chunks_mut::<4>().0 {
         let alpha = pixel[0] as f32;
         let (r, g, b) = (pixel[1] as f32, pixel[2] as f32, pixel[3] as f32);
         let luma = 0.299 * r + 0.587 * g + 0.114 * b;
