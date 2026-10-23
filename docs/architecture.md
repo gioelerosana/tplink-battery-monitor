@@ -53,7 +53,7 @@ into every later request. If a request fails because the token expired,
 `get_status` logs in again and retries once.
 
 Public surface: `login`, `call(module, action, data)`, `get_status`,
-`battery`, `reboot`. See [protocol.md](protocol.md) for the wire details.
+`battery`, `summary`, `payment_day`, `reboot`. See [protocol.md](protocol.md) for the wire details.
 
 ## Application layer — monitor
 
@@ -72,8 +72,15 @@ concepts:
 - **Hysteresis + cooldown**: a low-battery alert fires on the state
   transition and then at most every `NOTIFY_COOLDOWN_MINUTES`, to avoid spam
   when the level oscillates around the threshold.
+- **Daily data budget**: `daily_budget` in `src/tplink_mifi.rs` divides the
+  data left at the start of the day (cap minus the cycle total, excluding
+  today) by the days until the next renewal (`paymentDay` from `flowstat`,
+  clamped to the last day in short months). The budget stays fixed during the
+  day, and unused data raises the next days' budget. Reaching
+  `DAILY_BUDGET_WARNING` percent of it and going over each notify once per day.
 
-State (`low`, `last_notify`, `level`, `charging`, `full_notified`) is
+State (`low`, `last_notify`, `level`, `charging`, `full_notified`,
+`budget_day`, `budget_notified`) is
 persisted to JSON (`~/.cache/tplink-battery-monitor/state.json`) so a restart
 or a fresh timer tick does not duplicate or lose notifications. On the very
 first run the `charging` key is absent, so charge transitions are recorded

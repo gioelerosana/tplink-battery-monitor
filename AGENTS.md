@@ -20,13 +20,15 @@ Questo repository (`tplink-battery-monitor`) implementa strumenti di monitoraggi
    - `--tray`: applicazione companion residente in background nel pannello di sistema / system tray (KStatusNotifierItem / SNI / DBusMenu), con:
      - icona del logo TP-Link incorporata nel binario (`assets/tplink-*.argb` generati da `assets/tplink.svg`, nessun file a runtime); quando il router non risponde l'icona viene mostrata "spenta" (desaturata e piu' scura);
      - etichetta testuale accanto all'icona (Ayatana `XAyatanaLabel`): percentuale batteria e, di default, i GB rimanenti;
-     - menu compatto al clic: barre testuali a tutta larghezza su una riga dedicata sotto le voci batteria e dati (texture `█░` e `▓▒` per distinguerle) con indicatore colore generato a runtime (verde/rosso batteria, blu dati) e tacche segnale, tramite un encoder PNG minimale senza dipendenze (`src/icons.rs`); dettagli rete in un sottomenu;
+     - menu compatto al clic: barre testuali a tutta larghezza su una riga dedicata sotto le voci batteria, dati e consumo di oggi (texture `█░`, `▓▒` e `▆▁` per distinguerle) con indicatore colore generato a runtime (verde/rosso batteria, blu dati, viola budget giornaliero) e tacche segnale, tramite un encoder PNG minimale senza dipendenze (`src/icons.rs`); dettagli rete in un sottomenu;
+     - budget giornaliero (barra viola): GB rimasti a inizio giornata divisi per i giorni al rinnovo, con quota e giorno di rinnovo letti dal modulo router `flowstat` (`paymentDay`); compare solo con limite dati e rinnovo mensile attivi;
      - toggle `Risparmio energetico` che chiama il modulo router `power_save` (getConfig/setConfig), con retry in caso di caduta di rete transitoria;
      - toggle persistenti (`Percentuale batteria`, `Mostra GB`, `Notifiche`) salvati in `~/.config/tplink-battery-monitor/prefs.json`;
-     - notifiche desktop D-Bus per batteria bassa ed eventi di carica.
+     - notifiche desktop D-Bus per batteria bassa, eventi di carica e budget giornaliero (vicino alla soglia e superato, al massimo una volta al giorno ciascuna).
    - `--show-data-in-panel` / `--no-data-in-panel`: mostra i GB accanto all'icona (default: mostrati i GB).
    - `--show-battery-in-panel` / `--no-battery-in-panel`: mostra/nasconde la percentuale batteria accanto all'icona (default: mostrata).
    - `--threshold`, `--interval`, `--cooldown`, `--no-notify`, `--notify-recovery`: opzioni di controllo soglia e cadenza.
+   - `--daily-warning <N>` (o `DAILY_BUDGET_WARNING`): percentuale del budget giornaliero oltre la quale avvisare (default 80).
    - `--install` / `--uninstall`: installazione come servizio utente al login grafico (alias storici `--install-autostart` / `--uninstall-autostart`).
 
 4. **Dipendenza `ksni` vendorizzata**:

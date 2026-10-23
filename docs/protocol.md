@@ -53,6 +53,8 @@ and for authenticated modules such as `status`:
 | `webServer` | `getLang: 0`, `setLang: 1`, `keepAlive: 2`, `unsetDefault: 3`, `getModuleList: 4`, `getFeatureList: 5`, `getWithoutAuthInfo: 6` |
 | `status` | `getStatus: 0` |
 | `reboot` | `reboot: 0`, `powerOff: 1` |
+| `flowstat` | `getConfig: 0`, `setConfig: 1` |
+| `power_save` | `getConfig: 0`, `setConfig: 1` |
 
 The full vocabulary mirrors the one documented in the
 [`tp-link-m7200-api`](https://github.com/mt-ks/tp-link-m7200-api) project,
@@ -135,6 +137,32 @@ So `voltage: 98` means 98%. `connected` reports whether a battery is present;
 Useful neighbours in the same response: `deviceInfo.model`,
 `deviceInfo.firmwareVer`, `wan.networkType`, `wan.signalStrength`,
 `connectedDevices.number`.
+
+## Data plan settings (`flowstat`)
+
+`status` reports the traffic counters in `wan` (`totalStatistics` for the
+current cycle, `dailyStatistics` for today, `limitation` for the cap, all in
+bytes as strings), but not the renewal day. That lives in the data settings
+screen, `flowstat` / `getConfig`:
+
+```json
+{ "settings": { "enableDataLimit": true,
+                "limitation": "429496729600.000000",
+                "warningPercent": 95,
+                "enablePaymentDay": true,
+                "paymentDay": 22,
+                "adjustStatistics": "27863880286.000000",
+                "enableFreeDuration": false,
+                "durationStart": "23:00", "durationEnd": "07:00",
+                "enableWhenRoaming": false,
+                "dataLimit": 0 },
+  "result": 0 }
+```
+
+`paymentDay` is the day of the month (1-31, as validated by the web UI) when
+the cycle counter resets; it only applies when `enablePaymentDay` is true.
+Without it, `limitation` is a one-off total quota. `dataLimit` is not a type
+but the alert state (normal / warning / exceeded) used by the web UI.
 
 ## Notes and references
 

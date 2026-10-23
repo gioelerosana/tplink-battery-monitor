@@ -1,8 +1,9 @@
 //! Generazione delle icone usate nel menu della companion app.
 //!
 //! Le voci di menu DBusMenu accettano un'icona come PNG (`icon-data`): qui
-//! disegnamo piccole icone 16x16 (batteria, barra dati, segnale) e le
-//! codifichiamo con un encoder PNG minimale, senza dipendenze esterne.
+//! disegnamo piccole icone 16x16 (batteria, dati, budget giornaliero,
+//! segnale) e le codifichiamo con un encoder PNG minimale, senza dipendenze
+//! esterne.
 //!
 //! Inoltre forniamo la trasformazione ARGB32 usata per "spegnere" l'icona
 //! TP-Link incorporata quando il router non e' raggiungibile.
@@ -11,6 +12,7 @@ const CYAN: [u8; 4] = [74, 203, 214, 255];
 const GREEN: [u8; 4] = [76, 217, 100, 255];
 const RED: [u8; 4] = [255, 69, 58, 255];
 const BLUE: [u8; 4] = [10, 132, 255, 255];
+const PURPLE: [u8; 4] = [191, 90, 242, 255];
 const TRACK: [u8; 4] = [255, 255, 255, 38];
 
 // ------------------------------------------------------------------- PNG
@@ -159,6 +161,11 @@ pub fn data_dot_png() -> Vec<u8> {
     dot_png(BLUE)
 }
 
+/// Indicatore budget giornaliero: sempre viola.
+pub fn budget_dot_png() -> Vec<u8> {
+    dot_png(PURPLE)
+}
+
 /// Quattro tacche di segnale (0-4).
 pub fn signal_png(strength: i64) -> Vec<u8> {
     let mut canvas = Canvas::new(16, 16);
@@ -209,6 +216,7 @@ mod tests {
         assert_png(&signal_png(0));
         assert_png(&battery_dot_png(Some(37)));
         assert_png(&data_dot_png());
+        assert_png(&budget_dot_png());
     }
 
     #[test]

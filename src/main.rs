@@ -27,7 +27,7 @@ use ksni::blocking::TrayMethods;
 use notify_rust::{Notification, Urgency};
 use serde_json::{json, Value};
 
-use tplink_mifi::MiFiClient;
+use tplink_mifi::{format_bytes, DailyBudget, MiFiClient};
 
 mod dialog;
 mod icons;
@@ -37,6 +37,7 @@ struct Config {
     host: String,
     password: String,
     threshold: f64,
+    daily_warning: f64,
     interval_minutes: f64,
     cooldown_minutes: f64,
     once: bool,
@@ -153,6 +154,8 @@ Parametri di connessione e soglia:
   --host <HOST>           Indirizzo IP router (default: 192.168.0.1 o TPLINK_HOST)
   --password <PWD>        Password router (o TPLINK_PASSWORD)
   --threshold <N>         Soglia percentuale batteria (default: 20%)
+  --daily-warning <N>     Avvisa quando il consumo di oggi supera N% del budget
+                          giornaliero (default: 80%)
   --interval <MIN>        Intervallo controllo in minuti (default: 5)
   --cooldown <MIN>        Cooldown notifiche in minuti (default: 60)
   --no-notify             Disabilita le notifiche desktop
@@ -172,6 +175,7 @@ fn parse_args() -> Config {
         host: env::var("TPLINK_HOST").unwrap_or_else(|_| "192.168.0.1".to_string()),
         password: env::var("TPLINK_PASSWORD").unwrap_or_default(),
         threshold: env_f64("BATTERY_THRESHOLD", 20.0),
+        daily_warning: env_f64("DAILY_BUDGET_WARNING", 80.0),
         interval_minutes: env_f64("CHECK_INTERVAL_MINUTES", 5.0),
         cooldown_minutes: env_f64("NOTIFY_COOLDOWN_MINUTES", 60.0),
         once: false,
@@ -198,6 +202,9 @@ fn parse_args() -> Config {
             "--host" => config.host = take("--host"),
             "--password" => config.password = take("--password"),
             "--threshold" => config.threshold = take("--threshold").parse().unwrap_or(20.0),
+            "--daily-warning" => {
+                config.daily_warning = take("--daily-warning").parse().unwrap_or(80.0)
+            }
             "--interval" => config.interval_minutes = take("--interval").parse().unwrap_or(5.0),
             "--cooldown" => config.cooldown_minutes = take("--cooldown").parse().unwrap_or(60.0),
             "--once" => config.once = true,
@@ -349,8 +356,9 @@ fn format_panel_label(
 /// Barra testuale a tutta larghezza usata nel menu (una riga dedicata sotto
 /// la voce), per un colpo d'occhio immediato su batteria e consumo.
 ///
-/// Il colore non e' disponibile nelle voci di menu GNOME, quindi batteria e
-/// dati usano due texture diverse (`filled`/`empty`) per distinguerle.
+/// Il colore non e' disponibile nelle voci di menu GNOME, quindi batteria,
+/// dati e budget giornaliero usano texture diverse (`filled`/`empty`) per
+/// distinguerle.
 fn menu_bar(percent: f64, length: usize, filled: char, empty: char) -> String {
     let pct = percent.clamp(0.0, 100.0);
     let count = ((pct / 100.0) * length as f64).round() as usize;
@@ -471,6 +479,86 @@ fn process_battery_notifications(
     write_state(&state);
 }
 
+/// Livelli di avviso del budget giornaliero, salvati nello stato per non
+/// ripetere la stessa notifica nella stessa giornata.
+const BUDGET_NEAR: u64 = 1;
+const BUDGET_EXCEEDED: u64 = 2;
+
+fn budget_alert_level(percent: f64, warning: f64) -> u64 {
+    if percent >= 100.0 {
+        BUDGET_EXCEEDED
+    } else if percent >= warning {
+        BUDGET_NEAR
+    } else {
+        0
+    }
+}
+
+/// "tra N giorni" / "domani" per la data di rinnovo.
+fn format_days_until(days: i64) -> String {
+    if days == 1 {
+        "domani".to_string()
+    } else {
+        format!("tra {days} giorni")
+    }
+}
+
+/// Avvisa al massimo una volta al giorno per livello: quando il consumo di
+/// oggi raggiunge `warning`% del budget giornaliero e quando lo supera.
+fn process_budget_notifications(budget: &DailyBudget, warning: f64, notify_enabled: bool) {
+    let mut state = read_state();
+    let today = chrono::Local::now().format("%Y-%m-%d").to_string();
+    let already_notified = if state.get("budget_day").and_then(Value::as_str) == Some(&today) {
+        state
+            .get("budget_notified")
+            .and_then(Value::as_u64)
+            .unwrap_or(0)
+    } else {
+        0
+    };
+
+    let level = budget_alert_level(budget.percent, warning);
+    if level > already_notified {
+        let used = format_bytes(budget.used_bytes);
+        let total = format_bytes(budget.budget_bytes);
+        let percent = budget.percent;
+        if level == BUDGET_EXCEEDED {
+            let outlook = match budget.tomorrow_bytes {
+                Some(bytes) => format!("Il budget di domani scende a {}.", format_bytes(bytes)),
+                None => "Domani si rinnova il piano.".to_string(),
+            };
+            if notify_enabled {
+                notify(
+                    "Router M7350: budget di oggi superato",
+                    &format!("Usati {used} su {total} ({percent:.0}%). {outlook}"),
+                    Urgency::Normal,
+                    "dialog-warning",
+                );
+            }
+            log(&format!(
+                "NOTIFICA: budget giornaliero superato ({used} / {total})"
+            ));
+        } else {
+            let left = format_bytes((budget.budget_bytes - budget.used_bytes).max(0.0));
+            if notify_enabled {
+                notify(
+                    &format!("Router M7350: budget di oggi al {percent:.0}%"),
+                    &format!("Usati {used} su {total}. Restano {left} fino a mezzanotte."),
+                    Urgency::Normal,
+                    "dialog-information",
+                );
+            }
+            log(&format!(
+                "NOTIFICA: budget giornaliero al {percent:.0}% ({used} / {total})"
+            ));
+        }
+    }
+
+    state["budget_day"] = json!(today);
+    state["budget_notified"] = json!(level.max(already_notified));
+    write_state(&state);
+}
+
 fn print_data_overview(client: &mut MiFiClient) {
     let summary = match client.summary() {
         Ok(s) => s,
@@ -506,6 +594,18 @@ fn print_data_overview(client: &mut MiFiClient) {
         );
     }
     println!("  Consumo oggi:   {}", summary.data.daily_formatted);
+    if let Some(budget) = &summary.daily_budget {
+        println!(
+            "  Budget oggi:    {} (usato {:.0}%)",
+            format_bytes(budget.budget_bytes),
+            budget.percent
+        );
+        println!(
+            "  Rinnovo:        {} ({})",
+            budget.renewal_formatted,
+            format_days_until(budget.days_left)
+        );
+    }
     println!("──────────────────────────────────────────────────");
     let net_op = if !summary.data.operator.is_empty() {
         summary.data.operator.as_str()
@@ -525,13 +625,7 @@ fn print_data_overview(client: &mut MiFiClient) {
     println!("══════════════════════════════════════════════════");
 }
 
-fn check_once(
-    client: &mut MiFiClient,
-    threshold: f64,
-    notify_enabled: bool,
-    cooldown_minutes: f64,
-    notify_recovery: bool,
-) {
+fn check_once(client: &mut MiFiClient, config: &Config, notify_enabled: bool) {
     let summary = match client.summary() {
         Ok(s) => s,
         Err(err) => {
@@ -552,11 +646,14 @@ fn check_once(
     process_battery_notifications(
         level,
         charging,
-        threshold,
+        config.threshold,
         notify_enabled,
-        cooldown_minutes,
-        notify_recovery,
+        config.cooldown_minutes,
+        config.notify_recovery,
     );
+    if let Some(budget) = &summary.daily_budget {
+        process_budget_notifications(budget, config.daily_warning, notify_enabled);
+    }
 }
 
 // ----------------------------------------------------------------------- Tray
@@ -571,6 +668,7 @@ struct MiFiTray {
     data_limit: String,
     data_remaining: Option<String>,
     data_daily: String,
+    daily_budget: Option<DailyBudget>,
     usage_percent: Option<f64>,
     has_limit: bool,
     operator: String,
@@ -661,14 +759,22 @@ impl ksni::Tray for MiFiTray {
             } else {
                 "a batteria"
             };
+            let today = match &self.daily_budget {
+                Some(budget) => format!(
+                    "{} / {} ({:.0}%)",
+                    self.data_daily,
+                    format_bytes(budget.budget_bytes),
+                    budget.percent
+                ),
+                None => self.data_daily.clone(),
+            };
             if self.has_limit {
                 format!(
-                    "Batteria: {}% ({charge_info})\nDati: {} / {}\nRimanenti: {}\nOggi: {}",
+                    "Batteria: {}% ({charge_info})\nDati: {} / {}\nRimanenti: {}\nOggi: {today}",
                     self.battery_level.unwrap_or(0),
                     self.data_total,
                     self.data_limit,
                     self.data_remaining.as_deref().unwrap_or("N/A"),
-                    self.data_daily
                 )
             } else {
                 format!(
@@ -782,15 +888,56 @@ impl ksni::Tray for MiFiTray {
                 );
             }
 
-            items.push(
-                StandardItem {
-                    label: format!("Oggi {}", self.data_daily),
-                    icon_name: "x-office-calendar-symbolic".into(),
-                    enabled: false,
-                    ..Default::default()
+            // Oggi: consumo rispetto al budget giornaliero (barra viola),
+            // poi la data di rinnovo su cui e' calcolato.
+            match &self.daily_budget {
+                Some(budget) => {
+                    items.push(
+                        StandardItem {
+                            label: format!(
+                                "Oggi {} / {} · {:.0}%",
+                                self.data_daily,
+                                format_bytes(budget.budget_bytes),
+                                budget.percent
+                            ),
+                            enabled: false,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                    items.push(
+                        StandardItem {
+                            label: menu_bar(budget.percent, BAR_LEN, '▆', '▁'),
+                            icon_data: icons::budget_dot_png(),
+                            enabled: false,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
+                    items.push(
+                        StandardItem {
+                            label: format!(
+                                "Rinnovo {} · {}",
+                                budget.renewal_formatted,
+                                format_days_until(budget.days_left)
+                            ),
+                            icon_name: "x-office-calendar-symbolic".into(),
+                            enabled: false,
+                            ..Default::default()
+                        }
+                        .into(),
+                    );
                 }
-                .into(),
-            );
+                None => items.push(
+                    StandardItem {
+                        label: format!("Oggi {}", self.data_daily),
+                        icon_name: "x-office-calendar-symbolic".into(),
+                        enabled: false,
+                        ..Default::default()
+                    }
+                    .into(),
+                ),
+            }
 
             items.push(MenuItem::Separator);
 
@@ -957,6 +1104,7 @@ impl ksni::Tray for MiFiTray {
 /// Opzioni di avvio della companion app.
 struct TrayOptions {
     threshold: f64,
+    daily_warning: f64,
     interval_seconds: u64,
     cooldown_minutes: f64,
     notify_recovery: bool,
@@ -968,6 +1116,7 @@ struct TrayOptions {
 fn run_tray(mut client: MiFiClient, options: TrayOptions) {
     let TrayOptions {
         threshold,
+        daily_warning,
         interval_seconds,
         cooldown_minutes,
         notify_recovery,
@@ -1003,6 +1152,7 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
         data_limit: "Nessun limite".to_string(),
         data_remaining: None,
         data_daily: "0.00 B".to_string(),
+        daily_budget: None,
         usage_percent: None,
         has_limit: false,
         operator: String::new(),
@@ -1081,6 +1231,7 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
                     t.data_limit = summary.data.limit_formatted.clone();
                     t.data_remaining = summary.data.remaining_formatted.clone();
                     t.data_daily = summary.data.daily_formatted.clone();
+                    t.daily_budget = summary.daily_budget.clone();
                     t.usage_percent = summary.data.usage_percent;
                     t.has_limit = summary.data.has_limit;
                     t.operator = summary.data.operator.clone();
@@ -1101,6 +1252,9 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
                     cooldown_minutes,
                     notify_recovery,
                 );
+                if let Some(budget) = &summary.daily_budget {
+                    process_budget_notifications(budget, daily_warning, notify_active);
+                }
             }
             Err(err) => {
                 log(&format!("Errore lettura dati router: {err}"));
@@ -1173,6 +1327,7 @@ fn main() {
             client,
             TrayOptions {
                 threshold: config.threshold,
+                daily_warning: config.daily_warning,
                 interval_seconds: interval_sec,
                 cooldown_minutes: config.cooldown_minutes,
                 notify_recovery: config.notify_recovery,
@@ -1187,13 +1342,7 @@ fn main() {
     let notify_enabled = !config.no_notify;
 
     if config.once {
-        check_once(
-            &mut client,
-            config.threshold,
-            notify_enabled,
-            config.cooldown_minutes,
-            config.notify_recovery,
-        );
+        check_once(&mut client, &config, notify_enabled);
         return;
     }
 
@@ -1202,13 +1351,7 @@ fn main() {
         config.host, config.threshold, config.interval_minutes
     ));
     loop {
-        check_once(
-            &mut client,
-            config.threshold,
-            notify_enabled,
-            config.cooldown_minutes,
-            config.notify_recovery,
-        );
+        check_once(&mut client, &config, notify_enabled);
         sleep(Duration::from_secs_f64(config.interval_minutes * 60.0));
     }
 }
@@ -1319,5 +1462,26 @@ mod tests {
             ),
             ""
         );
+    }
+
+    #[test]
+    fn budget_alert_levels() {
+        assert_eq!(budget_alert_level(10.0, 80.0), 0);
+        assert_eq!(budget_alert_level(80.0, 80.0), BUDGET_NEAR);
+        assert_eq!(budget_alert_level(99.9, 80.0), BUDGET_NEAR);
+        assert_eq!(budget_alert_level(100.0, 80.0), BUDGET_EXCEEDED);
+        assert_eq!(budget_alert_level(150.0, 120.0), BUDGET_EXCEEDED);
+    }
+
+    #[test]
+    fn days_until_renewal() {
+        assert_eq!(format_days_until(1), "domani");
+        assert_eq!(format_days_until(30), "tra 30 giorni");
+    }
+
+    #[test]
+    fn menu_bar_clamps_over_budget() {
+        assert_eq!(menu_bar(150.0, 4, '▆', '▁'), "[▆▆▆▆]");
+        assert_eq!(menu_bar(50.0, 4, '▆', '▁'), "[▆▆▁▁]");
     }
 }

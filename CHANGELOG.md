@@ -8,6 +8,18 @@ the other two are bumped within the year.
 
 ## [Unreleased]
 
+## [26.0.2] - 2026-10-23
+
+### Added
+
+- Daily data budget: the GB left at the start of the day divided by the days
+  until the plan renewal, with the cap and renewal day read from the router
+  settings (`flowstat` module). The tray menu shows today's usage against it
+  with a purple bar and the renewal date; `--data` and the tooltip show it too.
+- Notification when today's usage reaches `DAILY_BUDGET_WARNING` percent of the
+  daily budget (default 80, also `--daily-warning`) and when it goes over, at
+  most once per day each.
+
 ## [26.0.1] - 2026-10-23
 
 First public release.
@@ -31,5 +43,6 @@ First public release.
   + MD5 login), shipped as a single static binary with no runtime
   dependencies.
 
-[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v26.0.1...HEAD
+[Unreleased]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v26.0.2...HEAD
+[26.0.2]: https://github.com/gioelerosana/tplink-battery-monitor/compare/v26.0.1...v26.0.2
 [26.0.1]: https://github.com/gioelerosana/tplink-battery-monitor/releases/tag/v26.0.1

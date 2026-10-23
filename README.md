@@ -16,6 +16,12 @@ and **remaining GB** next to the TP-Link icon in your panel. Click it for data
 usage, signal, connected devices, speed and a power-saving toggle. You also get
 desktop notifications for low battery and charging events.
 
+If the router has a data cap with a monthly renewal day, a purple bar shows
+today's **daily budget**: the GB left at midnight divided by the days until the
+renewal, both read from the router settings. Use less than the budget and the
+next days get more; use more and they get less. A notification tells you when
+today's usage reaches 80% of the budget and when it goes over.
+
 It talks directly to the router over your Wi-Fi. No cloud, no account.
 
 Tested on the **M7350 v9** (firmware 9.0.5). Other models using the same web API
@@ -53,6 +59,7 @@ Settings live in `~/.config/tplink-battery-monitor/.env`
 TPLINK_HOST=192.168.0.1
 TPLINK_PASSWORD=your_admin_password
 BATTERY_THRESHOLD=20
+DAILY_BUDGET_WARNING=80
 ```
 
 After editing, restart the service:

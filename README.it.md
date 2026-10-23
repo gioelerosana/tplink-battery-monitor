@@ -16,6 +16,13 @@ e i **GB rimanenti** del router accanto all'icona TP-Link nel pannello. Con un
 clic vedi consumo dati, segnale, dispositivi connessi, velocita' e un toggle per
 il risparmio energetico. Ricevi anche notifiche per batteria bassa e carica.
 
+Se sul router e' impostato un limite dati con giorno di rinnovo mensile, una
+barra viola mostra il **budget giornaliero** di oggi: i GB rimasti a mezzanotte
+divisi per i giorni che mancano al rinnovo, entrambi letti dalle impostazioni
+del router. Se consumi meno del budget, i giorni successivi ne hanno di piu';
+se consumi di piu', ne hanno di meno. Una notifica avvisa quando il consumo di
+oggi arriva all'80% del budget e quando lo supera.
+
 Comunica direttamente con il router via Wi-Fi. Niente cloud, niente account.
 
 Testato su **M7350 v9** (firmware 9.0.5). Gli altri modelli con la stessa API web

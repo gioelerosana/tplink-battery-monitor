@@ -1420,7 +1420,7 @@ dependencies = [
 
 [[package]]
 name = "tplink-battery-monitor"
-version = "26.0.1"
+version = "26.0.2"
 dependencies = [
  "aes",
  "base64",

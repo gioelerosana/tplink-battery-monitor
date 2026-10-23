@@ -31,6 +31,7 @@ use aes::Aes128;
 use base64::engine::general_purpose::STANDARD as B64;
 use base64::Engine;
 use cbc::cipher::{block_padding::Pkcs7, BlockDecryptMut, BlockEncryptMut, KeyIvInit};
+use chrono::{Datelike, NaiveDate};
 use md5::{Digest, Md5};
 use rand::distributions::Alphanumeric;
 use rand::Rng;
@@ -101,12 +102,35 @@ pub struct DataUsage {
     pub tx_speed_formatted: String,
 }
 
+/// Budget giornaliero di traffico: quanto si puo' consumare oggi per arrivare
+/// al rinnovo del piano senza esaurire la quota.
+///
+/// Il budget e' fissato a inizio giornata (dati rimasti a mezzanotte divisi
+/// per i giorni al rinnovo), quindi non cala mentre si consuma: se ieri si e'
+/// consumato meno del previsto, oggi il budget cresce, e viceversa.
+#[derive(Debug, Clone, PartialEq, serde::Serialize, serde::Deserialize)]
+pub struct DailyBudget {
+    pub budget_bytes: f64,
+    pub used_bytes: f64,
+    /// Consumo di oggi rispetto al budget; oltre 100 se superato.
+    pub percent: f64,
+    /// Budget di domani se da qui a mezzanotte non si consuma altro
+    /// (`None` l'ultimo giorno prima del rinnovo).
+    pub tomorrow_bytes: Option<f64>,
+    /// Giorni al rinnovo, oggi compreso.
+    pub days_left: i64,
+    /// Data del prossimo rinnovo (`gg/mm`).
+    pub renewal_formatted: String,
+}
+
 #[derive(Debug, Clone, serde::Serialize, serde::Deserialize)]
 pub struct DeviceSummary {
     pub model: String,
     pub firmware: String,
     pub battery: BatteryInfo,
     pub data: DataUsage,
+    /// Presente solo con limite dati e rinnovo mensile attivi sul router.
+    pub daily_budget: Option<DailyBudget>,
     pub connected_devices: i64,
 }
 
@@ -134,6 +158,64 @@ pub fn format_progress_bar(percent: f64, length: usize) -> String {
     let filled = ((pct / 100.0) * length as f64).round() as usize;
     let empty = length.saturating_sub(filled);
     format!("[{}{}] {:.1}%", "█".repeat(filled), "░".repeat(empty), pct)
+}
+
+/// Data di rinnovo nel mese indicato. Il router accetta giorni 1-31: nei mesi
+/// piu' corti il rinnovo cade sull'ultimo giorno del mese.
+fn renewal_in_month(year: i32, month: u32, payment_day: u32) -> Option<NaiveDate> {
+    (1..=payment_day.clamp(1, 31))
+        .rev()
+        .find_map(|day| NaiveDate::from_ymd_opt(year, month, day))
+}
+
+/// Prossimo rinnovo del piano dati dopo `today` (se il rinnovo e' oggi, conta
+/// quello del mese successivo: il contatore e' gia' stato azzerato).
+pub fn next_renewal(payment_day: u32, today: NaiveDate) -> Option<NaiveDate> {
+    let this_month = renewal_in_month(today.year(), today.month(), payment_day)?;
+    if this_month > today {
+        return Some(this_month);
+    }
+    let (year, month) = if today.month() == 12 {
+        (today.year() + 1, 1)
+    } else {
+        (today.year(), today.month() + 1)
+    };
+    renewal_in_month(year, month, payment_day)
+}
+
+/// Calcola il budget giornaliero dalla quota del piano, dal traffico del
+/// ciclo corrente (`total_bytes`, oggi compreso) e da quello di oggi.
+pub fn daily_budget(
+    limit_bytes: f64,
+    total_bytes: f64,
+    daily_bytes: f64,
+    payment_day: u32,
+    today: NaiveDate,
+) -> Option<DailyBudget> {
+    if limit_bytes <= 0.0 {
+        return None;
+    }
+    let renewal = next_renewal(payment_day, today)?;
+    let days_left = (renewal - today).num_days().max(1);
+    let used_before_today = (total_bytes - daily_bytes).max(0.0);
+    let budget_bytes = (limit_bytes - used_before_today).max(0.0) / days_left as f64;
+    let percent = if budget_bytes > 0.0 {
+        daily_bytes / budget_bytes * 100.0
+    } else if daily_bytes > 0.0 {
+        100.0
+    } else {
+        0.0
+    };
+    let tomorrow_bytes =
+        (days_left > 1).then(|| (limit_bytes - total_bytes).max(0.0) / (days_left - 1) as f64);
+    Some(DailyBudget {
+        budget_bytes,
+        used_bytes: daily_bytes,
+        percent,
+        tomorrow_bytes,
+        days_left,
+        renewal_formatted: renewal.format("%d/%m").to_string(),
+    })
 }
 
 pub fn network_type_name(code: i64) -> &'static str {
@@ -587,6 +669,21 @@ impl MiFiClient {
         };
 
         let data = self.data_usage(Some(&status))?;
+        // Il giorno di rinnovo sta solo nelle impostazioni del piano: senza
+        // budget il resto del riepilogo resta valido, quindi niente errore.
+        let daily_budget = if data.has_limit {
+            self.payment_day().ok().flatten().and_then(|day| {
+                daily_budget(
+                    data.limit_bytes,
+                    data.total_bytes,
+                    data.daily_bytes,
+                    day,
+                    chrono::Local::now().date_naive(),
+                )
+            })
+        } else {
+            None
+        };
         let connected_devices = status
             .pointer("/connectedDevices/number")
             .and_then(Value::as_i64)
@@ -597,8 +694,26 @@ impl MiFiClient {
             firmware,
             battery: battery_info,
             data,
+            daily_budget,
             connected_devices,
         })
+    }
+
+    /// Giorno del mese (1-31) in cui il router azzera il contatore dati, letto
+    /// dalle impostazioni del piano (modulo `flowstat`). `None` se il rinnovo
+    /// mensile e' disattivato.
+    pub fn payment_day(&mut self) -> Result<Option<u32>> {
+        let config = self.call("flowstat", 0, None)?;
+        let settings = config.get("settings");
+        let enabled = settings
+            .and_then(|s| s.get("enablePaymentDay"))
+            .and_then(Value::as_bool)
+            .unwrap_or(false);
+        let day = settings
+            .and_then(|s| s.get("paymentDay"))
+            .and_then(Value::as_u64)
+            .filter(|day| (1..=31).contains(day));
+        Ok(day.filter(|_| enabled).map(|day| day as u32))
     }
 
     pub fn reboot(&mut self) -> Result<Value> {
@@ -666,4 +781,100 @@ fn hex_decode(input: &str) -> Result<Vec<u8>> {
                 .map_err(|e| TpLinkError::Protocol(e.to_string()))
         })
         .collect()
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    const GB: f64 = 1024.0 * 1024.0 * 1024.0;
+
+    fn date(year: i32, month: u32, day: u32) -> NaiveDate {
+        NaiveDate::from_ymd_opt(year, month, day).unwrap()
+    }
+
+    #[test]
+    fn renewal_later_this_month() {
+        assert_eq!(
+            next_renewal(22, date(2026, 10, 5)),
+            Some(date(2026, 10, 22))
+        );
+    }
+
+    #[test]
+    fn renewal_day_counts_next_month() {
+        assert_eq!(
+            next_renewal(22, date(2026, 10, 22)),
+            Some(date(2026, 11, 22))
+        );
+        assert_eq!(
+            next_renewal(22, date(2026, 10, 23)),
+            Some(date(2026, 11, 22))
+        );
+    }
+
+    #[test]
+    fn renewal_wraps_year() {
+        assert_eq!(next_renewal(5, date(2026, 12, 20)), Some(date(2027, 1, 5)));
+    }
+
+    #[test]
+    fn renewal_clamps_to_short_months() {
+        assert_eq!(next_renewal(31, date(2027, 2, 10)), Some(date(2027, 2, 28)));
+        assert_eq!(next_renewal(31, date(2027, 2, 28)), Some(date(2027, 3, 31)));
+        assert_eq!(next_renewal(30, date(2028, 1, 30)), Some(date(2028, 2, 29)));
+    }
+
+    #[test]
+    fn budget_splits_remaining_quota_over_days_left() {
+        // 400 GB, 100 GB gia' usati prima di oggi, 30 giorni al rinnovo.
+        let budget = daily_budget(400.0 * GB, 100.0 * GB, 0.0, 22, date(2026, 10, 23)).unwrap();
+        assert_eq!(budget.days_left, 30);
+        assert!((budget.budget_bytes - 10.0 * GB).abs() < 1.0);
+        assert_eq!(budget.percent, 0.0);
+        assert_eq!(budget.renewal_formatted, "22/11");
+    }
+
+    #[test]
+    fn budget_is_fixed_during_the_day() {
+        let morning = daily_budget(400.0 * GB, 100.0 * GB, 0.0, 22, date(2026, 10, 23)).unwrap();
+        let evening =
+            daily_budget(400.0 * GB, 105.0 * GB, 5.0 * GB, 22, date(2026, 10, 23)).unwrap();
+        assert_eq!(morning.budget_bytes, evening.budget_bytes);
+        assert!((evening.percent - 50.0).abs() < 1e-9);
+    }
+
+    #[test]
+    fn saved_data_raises_tomorrow_budget() {
+        // Oggi 2 GB su 10: domani restano 298 GB su 29 giorni.
+        let budget =
+            daily_budget(400.0 * GB, 102.0 * GB, 2.0 * GB, 22, date(2026, 10, 23)).unwrap();
+        let tomorrow = budget.tomorrow_bytes.unwrap();
+        assert!(tomorrow > budget.budget_bytes);
+        assert!((tomorrow - 298.0 / 29.0 * GB).abs() < 1.0);
+    }
+
+    #[test]
+    fn exceeded_budget_goes_over_100() {
+        let budget =
+            daily_budget(400.0 * GB, 115.0 * GB, 15.0 * GB, 22, date(2026, 10, 23)).unwrap();
+        assert!((budget.percent - 150.0).abs() < 1e-9);
+        assert!(budget.tomorrow_bytes.unwrap() < budget.budget_bytes);
+    }
+
+    #[test]
+    fn last_day_gets_whole_remaining_quota() {
+        let budget = daily_budget(400.0 * GB, 390.0 * GB, 0.0, 22, date(2026, 11, 21)).unwrap();
+        assert_eq!(budget.days_left, 1);
+        assert!((budget.budget_bytes - 10.0 * GB).abs() < 1.0);
+        assert_eq!(budget.tomorrow_bytes, None);
+    }
+
+    #[test]
+    fn exhausted_quota() {
+        let budget = daily_budget(400.0 * GB, 401.0 * GB, 1.0 * GB, 22, date(2026, 11, 1)).unwrap();
+        assert_eq!(budget.budget_bytes, 0.0);
+        assert_eq!(budget.percent, 100.0);
+        assert!(daily_budget(0.0, 0.0, 0.0, 22, date(2026, 11, 1)).is_none());
+    }
 }
