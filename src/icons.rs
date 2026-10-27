@@ -134,15 +134,21 @@ impl Canvas {
 /// testuale a tutta larghezza: le voci di menu GNOME non possono colorare
 /// il testo.
 fn dot_png(colour: [u8; 4]) -> Vec<u8> {
-    let mut canvas = Canvas::new(16, 16);
-    let center = 7.5_f32;
-    let radius = 6.0_f32;
-    for y in 0..16 {
-        for x in 0..16 {
+    // 32x32 con bordo antialiasing: gli host che ingrandiscono l'icona
+    // (DankMaterialShell, Quickshell) non la mostrano sfocata.
+    const SIZE: i32 = 32;
+    let mut canvas = Canvas::new(SIZE, SIZE);
+    let center = SIZE as f32 / 2.0;
+    let radius = 12.0_f32;
+    for y in 0..SIZE {
+        for x in 0..SIZE {
             let dx = x as f32 + 0.5 - center;
             let dy = y as f32 + 0.5 - center;
-            if dx * dx + dy * dy <= radius * radius {
-                canvas.set(x, y, colour);
+            let coverage = (radius + 0.5 - (dx * dx + dy * dy).sqrt()).clamp(0.0, 1.0);
+            if coverage > 0.0 {
+                let mut pixel = colour;
+                pixel[3] = (colour[3] as f32 * coverage) as u8;
+                canvas.set(x, y, pixel);
             }
         }
     }

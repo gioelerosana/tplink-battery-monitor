@@ -363,7 +363,7 @@ fn menu_bar(percent: f64, length: usize, filled: char, empty: char) -> String {
     let pct = percent.clamp(0.0, 100.0);
     let count = ((pct / 100.0) * length as f64).round() as usize;
     format!(
-        "[{}{}]",
+        "{}{}",
         filled.to_string().repeat(count),
         empty.to_string().repeat(length - count)
     )
@@ -831,7 +831,7 @@ impl ksni::Tray for MiFiTray {
             items.push(MenuItem::Separator);
 
             // Batteria: valore, poi barra a tutta larghezza sotto la voce.
-            const BAR_LEN: usize = 22;
+            const BAR_LEN: usize = 18;
             let batt_label = match self.battery_level {
                 Some(lvl) if self.battery_charging => format!("Batteria {lvl}% · in carica"),
                 Some(lvl) => format!("Batteria {lvl}% · a batteria"),
@@ -879,7 +879,7 @@ impl ksni::Tray for MiFiTray {
             if self.has_limit {
                 items.push(
                     StandardItem {
-                        label: menu_bar(self.usage_percent.unwrap_or(0.0), BAR_LEN, '▓', '▒'),
+                        label: menu_bar(self.usage_percent.unwrap_or(0.0), BAR_LEN, '█', '░'),
                         icon_data: icons::data_dot_png(),
                         enabled: false,
                         ..Default::default()
@@ -907,7 +907,7 @@ impl ksni::Tray for MiFiTray {
                     );
                     items.push(
                         StandardItem {
-                            label: menu_bar(budget.percent, BAR_LEN, '▆', '▁'),
+                            label: menu_bar(budget.percent, BAR_LEN, '█', '░'),
                             icon_data: icons::budget_dot_png(),
                             enabled: false,
                             ..Default::default()
@@ -1481,7 +1481,7 @@ mod tests {
 
     #[test]
     fn menu_bar_clamps_over_budget() {
-        assert_eq!(menu_bar(150.0, 4, '▆', '▁'), "[▆▆▆▆]");
-        assert_eq!(menu_bar(50.0, 4, '▆', '▁'), "[▆▆▁▁]");
+        assert_eq!(menu_bar(150.0, 4, '▆', '▁'), "▆▆▆▆");
+        assert_eq!(menu_bar(50.0, 4, '▆', '▁'), "▆▆▁▁");
     }
 }
