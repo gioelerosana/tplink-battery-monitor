@@ -684,6 +684,7 @@ struct MiFiTray {
     notifications_enabled: Arc<AtomicBool>,
     refresh_requested: Arc<AtomicBool>,
     power_save_request: Arc<AtomicI32>,
+    power_off_request: Arc<AtomicBool>,
 }
 
 impl MiFiTray {
@@ -1039,6 +1040,35 @@ impl ksni::Tray for MiFiTray {
             );
         }
 
+        if self.connected {
+            let power_off_request = self.power_off_request.clone();
+            let refresh_requested = self.refresh_requested.clone();
+            items.push(
+                StandardItem {
+                    label: "Spegni router...".into(),
+                    icon_name: "system-shutdown-symbolic".into(),
+                    activate: Box::new(move |_| {
+                        // Il dialogo e' bloccante: fuori dal thread del menu.
+                        let power_off_request = power_off_request.clone();
+                        let refresh_requested = refresh_requested.clone();
+                        std::thread::spawn(move || {
+                            let confirmed = dialog::Ui::detect().confirm(
+                                "Spegnere il router?\n\nPer riaccenderlo servira' premere il \
+                                 tasto di accensione sul dispositivo.",
+                                "Spegni",
+                            );
+                            if confirmed {
+                                power_off_request.store(true, Ordering::SeqCst);
+                                refresh_requested.store(true, Ordering::SeqCst);
+                            }
+                        });
+                    }),
+                    ..Default::default()
+                }
+                .into(),
+            );
+        }
+
         items.push(MenuItem::Separator);
 
         // Toggle aspetto pannello e notifiche (persistenti tra i riavvii).
@@ -1133,6 +1163,7 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
 
     let refresh_requested = Arc::new(AtomicBool::new(false));
     let power_save_request = Arc::new(AtomicI32::new(0));
+    let power_off_request = Arc::new(AtomicBool::new(false));
     let notifications_enabled = Arc::new(AtomicBool::new(notify_enabled));
 
     let host_cleaned = client
@@ -1168,6 +1199,7 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
         notifications_enabled: notifications_enabled.clone(),
         refresh_requested: refresh_requested.clone(),
         power_save_request: power_save_request.clone(),
+        power_off_request: power_off_request.clone(),
     };
 
     let handle = match tray.spawn() {
@@ -1184,6 +1216,7 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
     let worker_refresh = refresh_requested.clone();
     let worker_notif = notifications_enabled.clone();
     let worker_power = power_save_request.clone();
+    let worker_power_off = power_off_request.clone();
 
     let _worker = std::thread::spawn(move || loop {
         // Applica un'eventuale richiesta di risparmio energetico dal menu,
@@ -1213,6 +1246,18 @@ fn run_tray(mut client: MiFiClient, options: TrayOptions) {
             // Rimetti in coda e risveglia subito il worker per ritentare.
             worker_power.store(power_request, Ordering::SeqCst);
             worker_refresh.store(true, Ordering::SeqCst);
+        }
+
+        if worker_power_off.swap(false, Ordering::SeqCst) {
+            match client.power_off() {
+                Ok(_) => log("Spegnimento del router richiesto"),
+                Err(err) => {
+                    // Se il router si spegne prima di rispondere la chiamata
+                    // fallisce: lo si capisce dal prossimo controllo.
+                    log(&format!("Richiesta di spegnimento: {err}"));
+                }
+            }
+            sleep(Duration::from_secs(3));
         }
 
         match client.summary() {

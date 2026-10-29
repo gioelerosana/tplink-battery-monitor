@@ -8,6 +8,12 @@ the other two are bumped within the year.
 
 ## [Unreleased]
 
+### Added
+
+- "Spegni router..." item in the tray menu: asks for confirmation (zenity or
+  kdialog) and powers the router off through the `reboot` module (`powerOff`),
+  without opening the web page.
+
 ## [26.0.2] - 2026-10-23
 
 ### Added
