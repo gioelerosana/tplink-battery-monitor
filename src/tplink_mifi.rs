@@ -720,6 +720,12 @@ impl MiFiClient {
         self.call("reboot", 0, None)
     }
 
+    /// Spegne il router (modulo `reboot`, azione `powerOff`). Il router smette
+    /// di rispondere subito dopo: l'errore di rete che ne segue e' normale.
+    pub fn power_off(&mut self) -> Result<Value> {
+        self.call("reboot", 1, None)
+    }
+
     /// Configurazione del risparmio energetico (`power_save`).
     pub fn power_save(&mut self) -> Result<Value> {
         self.call("power_save", 0, None)
